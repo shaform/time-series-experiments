@@ -24,6 +24,9 @@ class SingleUnlabeledDataLoader(object):
 
         self.num_steps, self.num_variables = self.data.shape
 
+    def __len__(self):
+        return self.num_variables * (self.num_steps - self.window_size * 2 + 1)
+
     def yield_batches(self, shuffle=True):
         indices = np.arange(self.window_size,
                             self.num_steps - self.window_size + 1)
@@ -56,8 +59,14 @@ class SingleUnlabeledDataLoader(object):
 
 
 class UnlabeledDataLoader(object):
-    def __init__(self, data_paths, window_size=25, batch_size=10, device=None):
+    def __init__(self,
+                 data_paths,
+                 shuffle=True,
+                 window_size=25,
+                 batch_size=10,
+                 device=None):
         self.data_paths = data_paths
+        self.shuffle = shuffle
         if isinstance(self.data_paths, str):
             self.data_paths = [self.data_paths]
 
@@ -72,6 +81,12 @@ class UnlabeledDataLoader(object):
                                       self.batch_size, self.device)
             for data_path in self.data_paths
         ]
+
+    def __len__(self):
+        return sum([len(data) for data in self.data])
+
+    def __iter__(self):
+        return self.yield_batches(shuffle=self.shuffle)
 
     def yield_batches(self, shuffle=True):
         yielders = [data.yield_batches(shuffle=shuffle) for data in self.data]
