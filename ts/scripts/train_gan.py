@@ -81,7 +81,18 @@ class GAN(object):
 
                 d_real_loss = self.criteria(self.disc(batch_data), ones)
                 d_fake_loss = self.criteria(self.disc(fake.detach()), zeros)
-                d_loss = (d_real_loss + d_fake_loss) / 2
+                d_g_loss = (d_real_loss + d_fake_loss) / 2
+
+                # discriminator for random real data
+                batch_perm = batch_data[torch.randperm(real_batch_size)]
+                batch_cat = torch.cat([batch_data, batch_perm], dim=-1)
+                diff = np.random.randint(0, 2 * self.window_size + 1)
+                batch_drift = batch_cat[:, diff:diff + 2 * self.window_size]
+                drift = ones * (
+                    np.abs(diff - self.window_size) / self.window_size)
+                d_drift_loss = self.criteria(
+                    self.disc(batch_drift.detach()), drift)
+                d_loss = d_g_loss + d_drift_loss
 
                 d_loss.backward()
                 d_optim.step()
