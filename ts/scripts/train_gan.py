@@ -43,7 +43,7 @@ class GAN(object):
             for i, batch_data in enumerate(t):
                 real_batch_size = batch_data.shape[0]
                 zeros = Variable(
-                    torch.ones(
+                    torch.zeros(
                         real_batch_size,
                         1,
                         dtype=torch.float,
@@ -56,7 +56,7 @@ class GAN(object):
                         dtype=torch.float,
                         device=self.device),
                     requires_grad=False)
-                c, _ = torch.split(
+                c, r = torch.split(
                     batch_data, [self.window_size, self.window_size], dim=-1)
 
                 # generator
@@ -87,6 +87,8 @@ class GAN(object):
                 d_optim.step()
 
                 t.set_postfix(
+                    f_mean=g_half.mean().item(),
+                    r_mean=r.mean().item(),
                     epoch='{}/{}'.format(epoch, num_epochs),
                     batch='{}/{}'.format(i, len(dataloader)),
                     d_loss=d_loss.item(),
