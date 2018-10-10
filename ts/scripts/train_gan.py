@@ -33,11 +33,13 @@ class GAN(object):
         os.makedirs(dirname, exist_ok=True)
         torch.save(self, save_path)
 
-    def train(self, dataloader, lr, beta1, beta2, num_epochs):
+    def train(self, dataloader, lr, beta1, beta2, num_epochs, save_path=None):
         g_optim = torch.optim.Adam(
             self.gen.parameters(), lr=lr, betas=(beta1, beta2))
         d_optim = torch.optim.Adam(
             self.disc.parameters(), lr=lr, betas=(beta1, beta2))
+        self.gen.train()
+        self.disc.train()
         for epoch in trange(num_epochs):
             t = tqdm(dataloader)
             for i, batch_data in enumerate(t):
@@ -105,6 +107,8 @@ class GAN(object):
                     d_loss=d_loss.item(),
                     g_loss=g_loss.item())
 
+            self.save(save_path + '.{}'.format(epoch))
+
 
 def train(data_paths, cuda, latent_size, window_size, save_path, num_epochs,
           batch_size, lr, beta1, beta2, seed):
@@ -123,7 +127,7 @@ def train(data_paths, cuda, latent_size, window_size, save_path, num_epochs,
         window_size=window_size,
         batch_size=batch_size,
         device=device)
-    gan.train(dataloader, lr, beta1, beta2, num_epochs)
+    gan.train(dataloader, lr, beta1, beta2, num_epochs, save_path=save_path)
 
     gan.save(save_path)
 
