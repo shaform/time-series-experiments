@@ -9,7 +9,7 @@ from torch.autograd import Variable
 from tqdm import trange, tqdm
 from torch.nn.utils import clip_grad_norm_
 
-from ..models import BasicRNN
+from ..models import BasicRNN, LSTNet
 from ..data_loader import UnlabeledDataLoader
 
 
@@ -17,6 +17,14 @@ class RNN(object):
     def __init__(self,
                  latent_size,
                  window_size,
+                 model_type,
+                 rnn_hidden_size,
+                 cnn_hidden_size,
+                 cnn_kernel_size,
+                 rnn_skip_hidden_size,
+                 skip_size,
+                 highway_size,
+                 dropout_rate,
                  bidirectional=True,
                  grad_clip=10.,
                  device=None):
@@ -26,15 +34,41 @@ class RNN(object):
         self.criteria = torch.nn.MSELoss()
         self.bidirectional = bidirectional
         self.grad_clip = grad_clip
-        self.forward_rnn = BasicRNN(
-            latent_size=latent_size, input_size=1, output_size=1)
-        if bidirectional:
-            self.backward_rnn = BasicRNN(
+
+        self.rnn_hidden_size = rnn_hidden_size
+        self.cnn_hidden_size = cnn_hidden_size
+        self.rnn_skip_hidden = rnn_skip_hidden_size
+        self.cnn_kernel_size = cnn_kernel_size
+        self.skip_size = skip_size
+        self.highway_size = highway_size
+        self.model_type = model_type
+        self.dropout_rate = dropout_rate
+
+        if model_type == 'gru':
+            self.forward_rnn = BasicRNN(
                 latent_size=latent_size, input_size=1, output_size=1)
-        self.backward_rnn.to(device)
+            if bidirectional:
+                self.backward_rnn = BasicRNN(
+                    latent_size=latent_size, input_size=1, output_size=1)
+        elif model_type == 'lstnet':
+            self.forward_rnn = LSTNet(
+                rnn_hidden_size=rnn_hidden_size,
+                cnn_hidden_size=cnn_hidden_size,
+                cnn_kernel_size=cnn_kernel_size,
+                rnn_skip_hidden_size=rnn_skip_hidden_size,
+                skip_size=skip_size,
+                highway_size=highway_size,
+                dropout_rate=dropout_rate,
+                window_size=window_size,
+                output_size=1)
+            if bidirectional:
+                self.backward_rnn = BasicRNN(
+                    latent_size=latent_size, input_size=1, output_size=1)
 
         self.criteria.to(device)
         self.forward_rnn.to(device)
+        if bidirectional:
+            self.backward_rnn.to(device)
 
     def save(self, save_path):
         dirname = os.path.dirname(save_path)
@@ -111,7 +145,9 @@ class RNN(object):
 
 
 def train(data_paths, cuda, latent_size, window_size, save_path, num_epochs,
-          batch_size, lr, beta1, beta2, grad_clip, seed):
+          batch_size, lr, beta1, beta2, grad_clip, model_type, rnn_hidden_size,
+          cnn_hidden_size, cnn_kernel_size, rnn_skip_hidden_size, skip_size,
+          highway_size, dropout_rate, seed):
     # configurate seed
     np.random.seed(seed)
     random.seed(seed)
@@ -125,6 +161,14 @@ def train(data_paths, cuda, latent_size, window_size, save_path, num_epochs,
         latent_size=latent_size,
         window_size=window_size,
         device=device,
+        model_type=model_type,
+        rnn_hidden_size=rnn_hidden_size,
+        cnn_hidden_size=cnn_hidden_size,
+        cnn_kernel_size=cnn_kernel_size,
+        rnn_skip_hidden_size=rnn_skip_hidden_size,
+        skip_size=skip_size,
+        highway_size=highway_size,
+        dropout_rate=dropout_rate,
         grad_clip=grad_clip)
     dataloader = UnlabeledDataLoader(
         data_paths=data_paths,
@@ -145,15 +189,44 @@ def parse_args():
     parser.add_argument('--save-path', default='models/gan')
     parser.add_argument('--num-epochs', type=int, default=200)
     parser.add_argument('--batch-size', type=int, default=128)
+    parser.add_argument('--model-type', default='gru')
     parser.add_argument('--lr', type=float, default=0.0001)
     parser.add_argument('--beta1', type=float, default=0.5)
     parser.add_argument('--beta2', type=float, default=0.999)
     parser.add_argument(
-        '--grad-clip',
-        type=float,
-        default=10.0,
-        help='gradient clipping for RNN')
+        '--grad-clip', type=float, default=10.0, help='gradient clipping')
     parser.add_argument('--seed', type=int, default=1127)
+    parser.add_argument(
+        '--cnn-hidden-size',
+        type=int,
+        default=10,
+        help='number of CNN hidden units for LSTNet')
+    parser.add_argument(
+        '--rnn-hidden-size',
+        type=int,
+        default=10,
+        help='number of RNN hidden units for LSTNet')
+    parser.add_argument(
+        '--cnn-kernel-size',
+        type=int,
+        default=6,
+        help='the kernel size of the CNN layers for LSTNet')
+    parser.add_argument(
+        '--highway-size',
+        type=int,
+        default=10,
+        help='The window size of the highway component for LSTNet')
+    parser.add_argument(
+        '--skip-size',
+        type=int,
+        default=10,
+        help='skip-length of RNN-skip layer for LSTNet')
+    parser.add_argument(
+        '--rnn-skip-hidden-size',
+        type=int,
+        default=5,
+        help='hidden units nubmer of RNN-skip layer for LSTNet')
+    parser.add_argument('--dropout-rate', type=float, default=0.)
     return parser.parse_args()
 
 
