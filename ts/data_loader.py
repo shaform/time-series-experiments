@@ -113,6 +113,7 @@ class LabeledDataLoader(object):
                  data_set,
                  start,
                  end,
+                 unlabelled=False,
                  shuffle=True,
                  window_size=25,
                  batch_size=10,
@@ -123,13 +124,29 @@ class LabeledDataLoader(object):
         self.shuffle = shuffle
         self.window_size = window_size
         self.batch_size = batch_size
+        self.is_unlabelled = unlabelled
         self.device = device
 
+    def unlabelled(self):
+        return LabeledDataLoader(self.data_set, self.start, self.end, True, self.shuffle, self.window_size, self.batch_size, self.device)
+
     def __len__(self):
-        return self.end - self.start
+        if self.is_unlabelled:
+            return math.ceil((self.end - self.start) * self.data_set.data.shape[1] / self.batch_size)
+        else:
+            return math.ceil((self.end - self.start) / self.batch_size)
+
 
     def __iter__(self):
-        return self.yield_batches(shuffle=self.shuffle)
+        if self.is_unlabelled:
+            return self.yield_unlabelled_batches(shuffle=self.shuffle)
+        else:
+            return self.yield_batches(shuffle=self.shuffle)
+
+    def yield_unlabelled_batches(self, shuffle=True):
+        for batch_data, _ in self.yield_batches(shuffle=shuffle):
+            for i in range(batch_data.shape[2]):
+                yield batch_data[:,:,i]
 
     def yield_batches(self, shuffle=True):
         indices = np.arange(self.start, self.end)

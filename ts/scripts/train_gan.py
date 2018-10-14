@@ -33,13 +33,17 @@ class GAN(object):
         os.makedirs(dirname, exist_ok=True)
         torch.save(self, save_path)
 
-    def train(self, dataloader, lr, beta1, beta2, num_epochs, save_path=None):
+    def train(self, dataloader, lr, beta1, beta2, num_epochs, save_path=None, finetune=False):
         g_optim = torch.optim.Adam(
             self.gen.parameters(), lr=lr, betas=(beta1, beta2))
         d_optim = torch.optim.Adam(
             self.disc.parameters(), lr=lr, betas=(beta1, beta2))
         self.gen.train()
         self.disc.train()
+        if finetune:
+            for layer in self.disc.model[:-1]:
+                for param in layer.parameters():
+                    param.require_grad = True
         for epoch in trange(num_epochs):
             t = tqdm(dataloader)
             for i, batch_data in enumerate(t):
@@ -99,15 +103,22 @@ class GAN(object):
                 d_loss.backward()
                 d_optim.step()
 
-                t.set_postfix(
-                    f_mean=g_half.mean().item(),
-                    r_mean=r.mean().item(),
-                    epoch='{}/{}'.format(epoch, num_epochs),
-                    batch='{}/{}'.format(i, len(dataloader)),
-                    d_loss=d_loss.item(),
-                    g_loss=g_loss.item())
+                if finetune:
+                    t.set_postfix(
+                        epoch='{}/{}'.format(epoch, num_epochs),
+                        batch='{}/{}'.format(i, len(dataloader)),
+                        d_loss=d_loss.item())
+                else:
+                    t.set_postfix(
+                            f_mean=g_half.mean().item(),
+                        r_mean=r.mean().item(),
+                        epoch='{}/{}'.format(epoch, num_epochs),
+                        batch='{}/{}'.format(i, len(dataloader)),
+                        d_loss=d_loss.item(),
+                        g_loss=g_loss.item())
 
-            self.save(save_path + '.{}'.format(epoch))
+            if save_path is not None:
+                self.save(save_path + '.{}'.format(epoch))
 
 
 def train(data_paths, cuda, latent_size, window_size, save_path, num_epochs,
