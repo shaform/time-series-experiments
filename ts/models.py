@@ -2,6 +2,36 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 
+# Simple GRU baseline
+class BasicRNN(nn.Module):
+    def __init__(self, latent_size, input_size, output_size, rnn_type='gru'):
+        super().__init__()
+
+        self.output_size = output_size
+        self.input_size = input_size
+        self.latent_size = latent_size
+
+        if rnn_type == 'gru':
+            self.rnn_layer = nn.GRU(self.input_size, self.latent_size)
+        else:
+            self.rnn_layer = nn.LSTM(self.input_size, self.latent_size)
+        self.fc_layer = nn.Sequential(
+            nn.Linear(self.latent_size, self.output_size),
+        )
+
+    # X_p:      batch_size x seq_len x var_dim
+    # X_p_enc:  batch_size x seq_len x RNN_hid_dim
+    # h_t:      1 x batch_size x RNN_hid_dim
+    # y_t:      batch_size x var_dim
+    def forward(self, inputs):
+        outputs, hidden = self.rnn_layer(inputs)
+        # outputs: [seq_len, batch, num_directions * hidden_size]
+        outputs = outputs[-1]
+
+        outputs = self.fc_layer(outputs)
+        # [batch, output_size]
+
+        return outputs
 
 class BasicGenerator(nn.Module):
     def __init__(self, latent_size, input_size, output_size):
