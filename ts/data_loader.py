@@ -6,6 +6,61 @@ import torch
 from torch.autograd import Variable
 
 
+class ForcastDataLoader(object):
+    def __init__(self,
+                 data_set,
+                 start,
+                 end,
+                 shuffle=True,
+                 window_size=25,
+                 batch_size=10,
+                 device=None):
+        self.data_set = data_set
+        self.start = start
+        self.end = end
+        self.shuffle = shuffle
+
+        self.window_size = window_size
+        self.batch_size = batch_size
+        self.device = device
+
+    def __len__(self):
+        return math.ceil((self.end - self.start) / self.batch_size)
+
+    def __iter__(self):
+        return self.yield_batches(shuffle=self.shuffle)
+
+    def yield_batches(self, shuffle=True):
+        indices = np.arange(max(self.window_size, self.start), self.end)
+        if shuffle:
+            indices = np.random.permutation(indices)
+
+        for i in range(0, indices.shape[0], self.batch_size):
+            batch_indices = indices[i:i + self.batch_size]
+            real_batch_size = batch_indices.shape[0]
+            batch_data = np.zeros((real_batch_size, self.window_size,
+                                   self.data_set.num_variables))
+            batch_labels = np.zeros((real_batch_size,
+                                     self.data_set.num_variables))
+
+            for j, index in enumerate(batch_indices):
+                batch_data[j] = self.data_set.data[index -
+                                                   self.window_size:index]
+                batch_labels[j] = self.data_set.data[index]
+
+            # create tensor on target device
+            batch_data = Variable(
+                torch.tensor(
+                    batch_data, dtype=torch.float, device=self.device),
+                requires_grad=False)
+            batch_labels = Variable(
+                torch.tensor(
+                    batch_labels, dtype=torch.float, device=self.device),
+                requires_grad=False)
+
+            yield batch_data, batch_labels
+
+
 class SingleUnlabeledDataLoader(object):
     def __init__(self, data_path, window_size=25, batch_size=10, device=None):
         self.data_path = data_path
@@ -108,6 +163,63 @@ class UnlabeledDataLoader(object):
                     yielders.pop()
 
 
+class ForcastDataSet(object):
+    def __init__(self,
+                 data_path,
+                 shuffle=True,
+                 window_size=25,
+                 batch_size=10,
+                 trn_ratio=0.6,
+                 val_ratio=0.8,
+                 device=None):
+        self.data_path = data_path
+        self.shuffle = shuffle
+
+        self.window_size = window_size
+        self.batch_size = batch_size
+        self.device = device
+        self.load_data(trn_ratio=trn_ratio, val_ratio=val_ratio)
+
+    def load_data(self, trn_ratio=0.6, val_ratio=0.8):
+        self.data = np.load(self.data_path)
+        # (N, ) to (N, 1)
+        self.data = self.data.reshape((self.data.shape[0], -1))
+
+        mean = np.mean(self.data, axis=0)
+        std = np.std(self.data, axis=0)
+
+        self.data = (self.data - mean) / std
+
+        self.num_steps, self.num_variables = self.data.shape
+        self.trn_end = int(np.ceil(self.num_steps * trn_ratio))
+        self.val_end = int(np.ceil(self.num_steps * val_ratio))
+
+        self.trn_set = ForcastDataLoader(
+            self,
+            self.window_size,
+            self.trn_end,
+            shuffle=self.shuffle,
+            window_size=self.window_size,
+            batch_size=self.batch_size,
+            device=self.device)
+        self.val_set = ForcastDataLoader(
+            self,
+            self.trn_end,
+            self.val_end,
+            shuffle=False,
+            window_size=self.window_size,
+            batch_size=self.batch_size,
+            device=self.device)
+        self.tst_set = ForcastDataLoader(
+            self,
+            self.val_end,
+            self.num_steps,
+            shuffle=False,
+            window_size=self.window_size,
+            batch_size=self.batch_size,
+            device=self.device)
+
+
 class LabeledDataLoader(object):
     def __init__(self,
                  data_set,
@@ -128,14 +240,16 @@ class LabeledDataLoader(object):
         self.device = device
 
     def unlabelled(self):
-        return LabeledDataLoader(self.data_set, self.start, self.end, True, self.shuffle, self.window_size, self.batch_size, self.device)
+        return LabeledDataLoader(self.data_set, self.start, self.end, True,
+                                 self.shuffle, self.window_size,
+                                 self.batch_size, self.device)
 
     def __len__(self):
         if self.is_unlabelled:
-            return math.ceil((self.end - self.start) * self.data_set.data.shape[1] / self.batch_size)
+            return math.ceil((self.end - self.start) *
+                             self.data_set.data.shape[1] / self.batch_size)
         else:
             return math.ceil((self.end - self.start) / self.batch_size)
-
 
     def __iter__(self):
         if self.is_unlabelled:
@@ -146,7 +260,7 @@ class LabeledDataLoader(object):
     def yield_unlabelled_batches(self, shuffle=True):
         for batch_data, _ in self.yield_batches(shuffle=shuffle):
             for i in range(batch_data.shape[2]):
-                yield batch_data[:,:,i]
+                yield batch_data[:, :, i]
 
     def yield_batches(self, shuffle=True):
         indices = np.arange(self.start, self.end)

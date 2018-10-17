@@ -12,6 +12,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--model-path', required=True)
 parser.add_argument('--bidirectional', action='store_true')
 parser.add_argument('--finetune', action='store_true')
+parser.add_argument('--raw', action='store_true')
 parser.add_argument('--window-size', type=int, default=25)
 args = parser.parse_args()
 
@@ -42,10 +43,32 @@ for data_set_list in data_sets:
     print('=====', data_set_list, '====')
     aucs = []
     for data_set in data_set_list:
-        d = LabeledDataSet(
-            data_set, device=torch.device('cuda'), shuffle=False)
-        rnn = torch.load(args.model_path)
-        if args.finetune:
+        if 'yahoo' in data_set:
+            # XXX Yahoo has special ratio
+            d = LabeledDataSet(
+                data_set,
+                device=torch.device('cuda'),
+                shuffle=False,
+                trn_ratio=0.50,
+                val_ratio=0.75)
+        else:
+            d = LabeledDataSet(
+                data_set, device=torch.device('cuda'), shuffle=False)
+        if args.raw:
+            device = torch.device('cuda')
+            rnn = RNN(
+                latent_size=10,
+                window_size=25,
+                device=device,
+                model_type='gru',
+                rnn_hidden_size=10,
+                cnn_hidden_size=10,
+                cnn_kernel_size=6,
+                rnn_skip_hidden_size=5,
+                skip_size=10,
+                highway_size=10,
+                dropout_rate=0,
+                grad_clip=10.)
             finetune_path = args.model_path + '.' + os.path.basename(data_set)
             best_path = finetune_path + '.best'
             if not os.path.exists(best_path):
@@ -58,6 +81,22 @@ for data_set_list in data_sets:
                     val_dataloader=d.val_set,
                     save_path=finetune_path)
             rnn = torch.load(best_path)
+        else:
+            rnn = torch.load(args.model_path)
+            if args.finetune:
+                finetune_path = args.model_path + '.' + os.path.basename(
+                    data_set)
+                best_path = finetune_path + '.best'
+                if not os.path.exists(best_path):
+                    rnn.train(
+                        d.trn_set.unlabelled(),
+                        lr=0.00005,
+                        beta1=0.5,
+                        beta2=0.999,
+                        num_epochs=20,
+                        val_dataloader=d.val_set,
+                        save_path=finetune_path)
+                rnn = torch.load(best_path)
 
         rnn.forward_rnn.eval()
         if args.bidirectional:
