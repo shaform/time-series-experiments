@@ -4,6 +4,7 @@ import os
 import numpy as np
 import random
 import torch
+from sklearn import metrics
 from numpy import genfromtxt
 from torch.autograd import Variable
 from tqdm import trange, tqdm
@@ -75,12 +76,49 @@ class RNN(object):
         os.makedirs(dirname, exist_ok=True)
         torch.save(self, save_path)
 
+    def eval_dataset(self, dataloader):
+        self.forward_rnn.eval()
+        if self.bidirectional:
+            self.backward_rnn.eval()
+        Y_pred = []
+        L_true = []
+        for Y, L in dataloader:
+            Y = Y.transpose(0, 1).contiguous()
+            forward_Y, backward_Y = torch.split(
+                Y, [self.window_size, self.window_size], dim=0)
+            backward_Y = torch.flip(backward_Y, dims=(0, ))
+            forward_y = backward_Y[-1]
+            backward_y = forward_Y[-1]
+            Y_pred_batch = None
+            for i in range(Y.shape[2]):
+                a_forward_y = self.forward_rnn(forward_Y[:, :, i:i + 1])
+                a_forward_y = (a_forward_y - forward_y[:, i:i + 1])**2
+                if self.bidirectional:
+                    a_backward_y = self.backward_rnn(backward_Y[:, :, i:i + 1])
+                    a_backward_y = (a_backward_y - backward_y[:, i:i + 1])**2
+                    a_Y = a_forward_y + a_backward_y
+                else:
+                    a_Y = a_forward_y
+                if Y_pred_batch is None:
+                    Y_pred_batch = a_Y
+                else:
+                    Y_pred_batch += a_Y
+            Y_pred.append(Y_pred_batch.data.cpu().numpy())
+            L_true.append(L)
+        Y_pred = np.concatenate(Y_pred, axis=0)
+        L_true = np.concatenate(L_true, axis=0)
+        fp_list, tp_list, thresholds = metrics.roc_curve(L_true, Y_pred)
+
+        auc = metrics.auc(fp_list, tp_list)
+        return auc
+
     def train(self,
               dataloader,
               lr,
               beta1,
               beta2,
               num_epochs,
+              val_dataloader=None,
               save_path=None,
               finetune=False):
         if self.bidirectional:
@@ -89,12 +127,21 @@ class RNN(object):
                     self.backward_rnn.parameters()),
                 lr=lr,
                 betas=(beta1, beta2))
-            self.backward_rnn.train()
         else:
             optim = torch.optim.Adam(
                 self.forward_rnn.parameters(), lr=lr, betas=(beta1, beta2))
-        self.forward_rnn.train()
+        if val_dataloader is not None:
+            best_auc = self.eval_dataset(val_dataloader)
+            best_epoch = 0
+            if save_path is not None:
+                self.save(save_path + '.best')
+        else:
+            best_auc = best_epoch = 0
+
         for epoch in trange(num_epochs):
+            self.forward_rnn.train()
+            if self.bidirectional:
+                self.backward_rnn.train()
             t = tqdm(dataloader)
             for i, batch_data in enumerate(t):
                 real_batch_size = batch_data.shape[0]
@@ -137,10 +184,19 @@ class RNN(object):
                 t.set_postfix(
                     epoch='{}/{}'.format(epoch, num_epochs),
                     batch='{}/{}'.format(i, len(dataloader)),
+                    best_auc=best_auc,
+                    best_epoch=best_epoch,
                     f_loss=f_loss_item,
                     b_loss=b_loss_item)
 
-                if save_path is not None:
+            if save_path is not None:
+                if val_dataloader is not None:
+                    auc = self.eval_dataset(val_dataloader)
+                    if auc > best_auc:
+                        best_auc = auc
+                        best_epoch = epoch
+                        self.save(save_path + '.best')
+                else:
                     self.save(save_path + '.{}'.format(epoch))
 
 
