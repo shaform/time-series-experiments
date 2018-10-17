@@ -125,39 +125,43 @@ class BasicRNN(nn.Module):
 
         if predict_x:
             self.pred_layer = nn.Sequential(
-                nn.Linear(self.latent_size, self.output_size), )
+                nn.Linear(self.latent_size, self.input_size), )
             self.attn_layer = nn.Sequential(
-                nn.Linear(self.latent_size + self.output_size * 2, 1), )
+                nn.Linear(self.latent_size + self.input_size * 2, 1), )
 
-    def forward(self, inputs):
-        # if self.predict_x:
-        #     attn = None
-        #     output_pred = None
-        #     outputs = []
-        #     outputs_pred = []
-        #     for i, inputs_t in enumerate(inputs.chunk(input.size(0), dim=0)):
-        #         if attn is not None:
-        #             inputs_t = attn * input_t + (1 - attn) * output_pred
-        #             o_t, h_t = self.rnn_layer(inputs_t)
-        #             output = self.fc_layer(o_t[-1])
-        #             output_pred = self.pred_layer(o_t[-1])
+    def forward(self, inputs, predict_all=False):
+        if self.predict_x:
+            attn = None
+            output_pred = None
+            outputs = []
+            outputs_pred = []
+            for i, inputs_t in enumerate(inputs.chunk(inputs.size(0), dim=0)):
+                if output_pred is not None:
+                    output_attn = torch.cat([inputs_t, output_pred, h_t],
+                                            dim=1)
+                    attn = F.sigmoid(self.attn_layer(output_attn))
 
-        #             output_attn = torch.cat([output, output_pred, h_t], dim=1)
-        #             attn = F.sigmoid(self.attn_layer(output_attn))
-        #         outputs += [output]
-        #         outputs_pred += [output_pred]
-        #     outputs = torch.stack(outputs, 1)
-        #     outputs_pred = torch.stack(outputs, 1)
-        #     return outputs, outputs_pred
-        # else:
-        outputs, hidden = self.rnn_layer(inputs)
-        # outputs: [seq_len, batch, num_directions * hidden_size]
-        outputs = outputs[-1]
+                    inputs_t = attn * inputs_t + (1 - attn) * output_pred
 
-        outputs = self.fc_layer(outputs)
-        # [batch, output_size]
+                o_t, h_t = self.rnn_layer(inputs_t)
+                output = self.fc_layer(o_t[-1])
+                output_pred = self.pred_layer(o_t[-1])
 
-        return outputs
+                outputs += [output]
+                outputs_pred += [output_pred]
+            outputs = torch.stack(outputs, 0)
+            outputs_pred = torch.stack(outputs_pred, 0)
+            return outputs, outputs_pred
+        else:
+            outputs, hidden = self.rnn_layer(inputs)
+            # outputs: [seq_len, batch, num_directions * hidden_size]
+            if not predict_all:
+                outputs = outputs[-1]
+
+            outputs = self.fc_layer(outputs)
+            # [batch, output_size]
+
+            return outputs
 
 
 class BasicGenerator(nn.Module):
