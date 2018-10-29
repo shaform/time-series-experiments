@@ -68,9 +68,14 @@ class LSTNet(nn.Module):
         # RNN
         # -> [seq, batch, hidden]
         r = outputs.permute(2, 0, 1).contiguous()
-        _, r = self.gru1(r)
+        seq_len = r.size(0)
+        hidden = None
+        for i in range(seq_len):
+            r_step = r[i].unsqueeze(0)
+            _, hidden = self.gru1(r_step, hidden)
+            hidden = self.dropout(hidden)
+        r = hidden.squeeze(0)
         # -> [batch, hidden_size]
-        r = self.dropout(torch.squeeze(r, 0))
 
         # RNN-GRUskip
         if (self.skip_size > 0):
@@ -80,9 +85,13 @@ class LSTNet(nn.Module):
             s = s.permute(2, 0, 3, 1).contiguous()
             s = s.view(self.pt, batch_size * self.skip_size,
                        self.cnn_hidden_size)
-            _, s = self.gru_skip(s)
-            s = s.view(batch_size, self.skip_size * self.rnn_skip_hidden)
-            s = self.dropout(s)
+            seq_len = s.size(0)
+            hidden = None
+            for i in range(seq_len):
+                s_step = s[i].unsqueeze(0)
+                _, hidden = self.gru_skip(s_step, hidden)
+                hidden = self.dropout(hidden)
+            s = hidden.squeeze(0)
             r = torch.cat((r, s), 1)
 
         res = self.linear1(r)
@@ -138,19 +147,19 @@ class BasicRNN(nn.Module):
             for i, inputs_t in enumerate(inputs.chunk(inputs.size(0), dim=0)):
                 if output_pred is not None:
                     output_attn = torch.cat([inputs_t, output_pred, h_t],
-                                            dim=1)
+                                            dim=2)
                     attn = F.sigmoid(self.attn_layer(output_attn))
 
                     inputs_t = attn * inputs_t + (1 - attn) * output_pred
 
                 o_t, h_t = self.rnn_layer(inputs_t)
-                output = self.fc_layer(o_t[-1])
-                output_pred = self.pred_layer(o_t[-1])
+                output = self.fc_layer(o_t[-1]).unsqueeze(0)
+                output_pred = self.pred_layer(o_t[-1]).unsqueeze(0)
 
                 outputs += [output]
                 outputs_pred += [output_pred]
-            outputs = torch.stack(outputs, 0)
-            outputs_pred = torch.stack(outputs_pred, 0)
+            outputs = torch.cat(outputs, 0)
+            outputs_pred = torch.cat(outputs_pred, 0)
             return outputs, outputs_pred
         else:
             outputs, hidden = self.rnn_layer(inputs)
