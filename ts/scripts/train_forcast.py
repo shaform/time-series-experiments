@@ -79,7 +79,11 @@ class ForcastRNN(object):
         MSE = []
         for X, Y in dataloader:
             X = X.transpose(0, 1).contiguous()
-            pY = self.rnn(X, predict_all=True)
+            pp = self.rnn(X, predict_all=True)
+            if isinstance(pp, tuple):
+                pY, _ = pp
+            else:
+                pY = pp
             pY = pY[-1]
             MSE.append(self.criteria(pY, Y).item())
         loss = sum(MSE) / len(MSE)
@@ -116,8 +120,10 @@ class ForcastRNN(object):
                                        0).contiguous()
                 optim.zero_grad()
 
-                predicts = self.rnn(batch_data, predict_all=True)
-                loss = self.criteria(predicts, all_labels)
+                predicts, predicts_x = self.rnn(batch_data, predict_all=True)
+                loss1 = self.criteria(predicts, all_labels)
+                loss2 = self.criteria(predicts_x, all_labels)
+                loss = loss1 + loss2
                 loss.backward()
                 clip_grad_norm_(self.rnn.parameters(), self.grad_clip)
                 optim.step()
@@ -127,7 +133,9 @@ class ForcastRNN(object):
                     batch='{}/{}'.format(i, len(dataloader)),
                     best_loss=best_loss,
                     best_epoch=best_epoch,
-                    loss=loss.item())
+                    loss1=loss1.item(),
+                    loss2=loss2.item(),
+                )
 
             if save_path is not None:
                 if val_dataloader is not None:
@@ -136,6 +144,8 @@ class ForcastRNN(object):
                         best_loss = loss
                         best_epoch = epoch
                         self.save(save_path + '.best')
+                    else:
+                        print(loss, 'greater than', best_loss)
                 else:
                     self.save(save_path + '.{}'.format(epoch))
 
@@ -143,7 +153,7 @@ class ForcastRNN(object):
 def train(data_path, cuda, latent_size, window_size, save_path, num_epochs,
           batch_size, lr, beta1, beta2, grad_clip, model_type, rnn_hidden_size,
           cnn_hidden_size, cnn_kernel_size, rnn_skip_hidden_size, skip_size,
-          highway_size, dropout_rate, predict_x, seed):
+          highway_size, dropout_rate, predict_x, test, seed):
     # configurate seed
     np.random.seed(seed)
     random.seed(seed)
@@ -158,32 +168,37 @@ def train(data_path, cuda, latent_size, window_size, save_path, num_epochs,
         window_size=window_size,
         batch_size=batch_size,
         device=device)
-    rnn = ForcastRNN(
-        input_size=dataloader.num_variables,
-        output_size=dataloader.num_variables,
-        predict_x=predict_x,
-        latent_size=latent_size,
-        window_size=window_size,
-        device=device,
-        model_type=model_type,
-        rnn_hidden_size=rnn_hidden_size,
-        cnn_hidden_size=cnn_hidden_size,
-        cnn_kernel_size=cnn_kernel_size,
-        rnn_skip_hidden_size=rnn_skip_hidden_size,
-        skip_size=skip_size,
-        highway_size=highway_size,
-        dropout_rate=dropout_rate,
-        grad_clip=grad_clip)
-    rnn.train(
-        dataloader.trn_set,
-        lr,
-        beta1,
-        beta2,
-        num_epochs,
-        save_path=save_path,
-        val_dataloader=dataloader.val_set)
+    if test:
+        rnn = torch.load(save_path + '.best')
+        loss = rnn.eval_dataset(dataloader.tst_set)
+        print(loss)
+    else:
+        rnn = ForcastRNN(
+            input_size=dataloader.num_variables,
+            output_size=dataloader.num_variables,
+            predict_x=predict_x,
+            latent_size=latent_size,
+            window_size=window_size,
+            device=device,
+            model_type=model_type,
+            rnn_hidden_size=rnn_hidden_size,
+            cnn_hidden_size=cnn_hidden_size,
+            cnn_kernel_size=cnn_kernel_size,
+            rnn_skip_hidden_size=rnn_skip_hidden_size,
+            skip_size=skip_size,
+            highway_size=highway_size,
+            dropout_rate=dropout_rate,
+            grad_clip=grad_clip)
+        rnn.train(
+            dataloader.trn_set,
+            lr,
+            beta1,
+            beta2,
+            num_epochs,
+            save_path=save_path,
+            val_dataloader=dataloader.val_set)
 
-    rnn.save(save_path)
+        rnn.save(save_path)
 
 
 def parse_args():
@@ -234,6 +249,7 @@ def parse_args():
         help='hidden units nubmer of RNN-skip layer for LSTNet')
     parser.add_argument('--dropout-rate', type=float, default=0.)
     parser.add_argument('--predict-x', action='store_true')
+    parser.add_argument('--test', action='store_true')
     return parser.parse_args()
 
 
