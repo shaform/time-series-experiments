@@ -1,0 +1,11 @@
+name: ts
+channels:
+  - pytorch
+  - defaults
+dependencies:
+  - python=3.6.5
+  - numpy
+  - tqdm=4.23.0=py36_0
+  - pytorch=0.4.1=py36_py35_py27__9.0.176_7.1.2_2
+  - torchvision=0.2.1=py36_1
+  - flake8=3.5.0=py36_1
