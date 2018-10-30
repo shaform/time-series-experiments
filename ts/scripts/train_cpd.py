@@ -30,6 +30,7 @@ class CPDRNN(object):
                  dropout_rate,
                  bidirectional,
                  predict_horizon=False,
+                 predict_each=False,
                  grad_clip=10.,
                  device=None):
         self.device = device
@@ -50,21 +51,33 @@ class CPDRNN(object):
         self.model_type = model_type
         self.dropout_rate = dropout_rate
         self.predict_horizon = predict_horizon
+        self.predict_each = predict_each
+
+        if predict_each:
+            actual_input_size = 1
+        else:
+            actual_input_size = self.input_size
 
         if predict_horizon:
-            actual_output_size = self.window_size * self.output_size
+            if predict_each:
+                actual_output_size = self.window_size
+            else:
+                actual_output_size = self.window_size * self.output_size
         else:
-            actual_output_size = self.output_size
+            if predict_each:
+                actual_output_size = 1
+            else:
+                actual_output_size = self.output_size
 
         if model_type == 'gru':
             self.rnn = BasicRNN(
                 latent_size=latent_size,
-                input_size=input_size,
+                input_size=actual_input_size,
                 output_size=actual_output_size)
             if bidirectional:
                 self.back_rnn = BasicRNN(
                     latent_size=latent_size,
-                    input_size=input_size,
+                    input_size=actual_input_size,
                     output_size=actual_output_size)
         elif model_type == 'lstnet':
             self.rnn = LSTNet(
@@ -76,7 +89,7 @@ class CPDRNN(object):
                 highway_size=highway_size,
                 dropout_rate=dropout_rate,
                 window_size=window_size,
-                input_size=input_size,
+                input_size=actual_input_size,
                 output_size=actual_output_size)
             if bidirectional:
                 self.back_rnn = LSTNet(
@@ -88,7 +101,7 @@ class CPDRNN(object):
                     highway_size=highway_size,
                     dropout_rate=dropout_rate,
                     window_size=window_size,
-                    input_size=input_size,
+                    input_size=actual_input_size,
                     output_size=actual_output_size)
 
         self.criteria.to(device)
@@ -142,27 +155,40 @@ class CPDRNN(object):
                 forward_y = backward_X[-1]
                 backward_y = forward_X[-1]
 
-            forward_y_hat = self.rnn(forward_X)
+            if self.predict_each:
+                forward_y_hat = []
+                for i in range(X.shape[2]):
+                    forward_y_hat_each = self.rnn(forward_X[:, :, i:i + 1])
+                    forward_y_hat.append(forward_y_hat_each.unsqueeze(-1))
+                forward_y_hat = torch.cat(forward_y_hat, dim=-1)
+            else:
+                forward_y_hat = self.rnn(forward_X)
             # -> [B, C]
 
-            if self.predict_horizon:
-                forward_y_scores = ((forward_y_hat.view(
-                    forward_y_hat.size(0), self.window_size, self.output_size)
-                                     - forward_y)**2).sum(1)
-            else:
-                forward_y_scores = ((forward_y_hat - forward_y)**2).sum(1)
+            forward_y_scores = ((forward_y_hat.view(forward_y_hat.size(0), -1)
+                                 - forward_y.view(forward_y_hat.size(0), -1))
+                                **2).sum(-1)
+            if len(forward_y_scores.size()) > 1:
+                forward_y_scores = forward_y_scores.sum(-1)
             # -> B
             scores = forward_y_scores
 
             if self.bidirectional:
-                backward_y_hat = self.back_rnn(backward_X)
-                if self.predict_horizon:
-                    backward_y_scores = ((backward_y_hat.view(
-                        backward_y_hat.size(0), self.window_size,
-                        self.output_size) - backward_y)**2).sum(1)
+                if self.predict_each:
+                    backward_y_hat = []
+                    for i in range(X.shape[2]):
+                        backward_y_hat_each = self.back_rnn(
+                            backward_X[:, :, i:i + 1])
+                        backward_y_hat.append(
+                            backward_y_hat_each.unsqueeze(-1))
+                    backward_y_hat = torch.cat(backward_y_hat, dim=-1)
                 else:
-                    backward_y_scores = ((backward_y_hat - backward_y)
-                                         **2).sum(1)
+                    backward_y_hat = self.back_rnn(backward_X)
+                backward_y_scores = (
+                    (backward_y_hat.view(backward_y_hat.size(0), -1) -
+                     backward_y.view(backward_y_hat.size(0), -1))**2).sum(-1)
+                if len(backward_y_scores.size()) > 1:
+                    backward_y_scores = backward_y_scores.sum(-1)
                 scores += backward_y_scores
 
             Y_pred.append(scores.data.cpu().numpy())
@@ -203,44 +229,58 @@ class CPDRNN(object):
         else:
             best_auc = 0
 
-        train_iter = hit_patience = hit_patience = num_trial = 0
+        train_iter = hit_patience = num_trial = 0
         report_loss = report_examples = 0
         cumulative_examples = 0
         begin_time = time.time()
         self.set_train()
         for epoch in trange(num_epochs):
             t = tqdm(dataloader)
-            for i, batch_data in enumerate(t):
-                real_batch_size = batch_data.shape[0]
-                batch_data = batch_data.transpose(
-                    0, 1).unsqueeze(-1).contiguous()
-                forward_x, backward_x = torch.split(
-                    batch_data, [self.window_size, self.window_size], dim=0)
-                backward_x = torch.flip(backward_x, dims=(0, ))
+            for i, X in enumerate(t):
+                real_batch_size = X.shape[0]
+                if len(X.size()) == 2:
+                    X = X.transpose(0, 1).unsqueeze(-1).contiguous()
+                else:
+                    X = X.transpose(0, 1).contiguous()
+                forward_X, backward_X = torch.split(
+                    X, [self.window_size, self.window_size], dim=0)
+                backward_X = torch.flip(backward_X, dims=(0, ))
                 # [wind_size, batch, 1]
 
                 if self.predict_horizon:
-                    forward_y = backward_x.transpose(0, 1)
-                    backward_y = forward_x.transpose(0, 1)
+                    forward_y = backward_X.transpose(0, 1)
+                    backward_y = forward_X.transpose(0, 1)
                 else:
-                    forward_y = backward_x[-1]
-                    backward_y = forward_x[-1]
+                    forward_y = backward_X[-1]
+                    backward_y = forward_X[-1]
 
                 optim.zero_grad()
-                pred_forward_y = self.rnn(forward_x)
-                if self.predict_horizon:
-                    pred_forward_y = pred_forward_y.view(
-                        pred_forward_y.size(0), self.window_size,
-                        self.output_size)
-                f_loss = self.criteria(pred_forward_y, forward_y)
+                if self.predict_each:
+                    forward_y_hat = []
+                    for i in range(X.shape[2]):
+                        forward_y_hat_each = self.rnn(forward_X[:, :, i:i + 1])
+                        forward_y_hat.append(forward_y_hat_each.unsqueeze(-1))
+                    forward_y_hat = torch.cat(forward_y_hat, dim=-1)
+                else:
+                    forward_y_hat = self.rnn(forward_X)
+                f_loss = self.criteria(
+                    forward_y_hat.view(forward_y_hat.size(0), -1),
+                    forward_y.view(forward_y_hat.size(0), -1))
 
                 if self.bidirectional:
-                    pred_backward_y = self.back_rnn(backward_x)
-                    if self.predict_horizon:
-                        pred_backward_y = pred_backward_y.view(
-                            pred_backward_y.size(0), self.window_size,
-                            self.output_size)
-                    b_loss = self.criteria(pred_backward_y, backward_y)
+                    if self.predict_each:
+                        backward_y_hat = []
+                        for i in range(X.shape[2]):
+                            backward_y_hat_each = self.back_rnn(
+                                backward_X[:, :, i:i + 1])
+                            backward_y_hat.append(
+                                backward_y_hat_each.unsqueeze(-1))
+                        backward_y_hat = torch.cat(backward_y_hat, dim=-1)
+                    else:
+                        backward_y_hat = self.back_rnn(backward_X)
+                    b_loss = self.criteria(
+                        backward_y_hat.view(backward_y_hat.size(0), -1),
+                        backward_y.view(backward_y_hat.size(0), -1))
                     loss = (f_loss + b_loss) / 2.
                 else:
                     loss = f_loss
@@ -287,9 +327,9 @@ class CPDRNN(object):
                         if hit_patience == patience:
                             num_trial += 1
                             print('hit #%d trial' % num_trial, file=sys.stderr)
-                        if num_trial == max_num_trial:
-                            print('early stop!', file=sys.stderr)
-                            return
+                            if num_trial == max_num_trial:
+                                print('early stop!', file=sys.stderr)
+                                return
 
                             lr = lr * lr_decay
                             print(
@@ -338,6 +378,7 @@ def train(args):
         dataloader = LabeledDataSet(
             batch_size=args.batch_size,
             data_path=args.data_path,
+            window_size=args.window_size,
             device=device,
             shuffle=False,
             trn_ratio=0.50,
@@ -346,6 +387,7 @@ def train(args):
         dataloader = LabeledDataSet(
             batch_size=args.batch_size,
             data_path=args.data_path,
+            window_size=args.window_size,
             device=device,
             shuffle=False)
     if args.test:
@@ -369,9 +411,10 @@ def train(args):
             highway_size=args.highway_size,
             dropout_rate=args.dropout_rate,
             predict_horizon=args.predict_horizon,
+            predict_each=args.predict_each,
             grad_clip=args.grad_clip)
         rnn.train(
-            dataloader=dataloader.trn_set.unlabelled(),
+            dataloader=dataloader.trn_set.unlabelled(full=True),
             lr=args.lr,
             beta1=args.beta1,
             beta2=args.beta2,
@@ -440,6 +483,7 @@ def parse_args():
     parser.add_argument('--test', action='store_true')
     parser.add_argument('--bidirectional', action='store_true')
     parser.add_argument('--predict-horizon', action='store_true')
+    parser.add_argument('--predict-each', action='store_true')
     parser.add_argument('--weight-decay', type=float, default=0.001)
     return parser.parse_args()
 

@@ -229,7 +229,8 @@ class LabeledDataLoader(object):
                  shuffle=True,
                  window_size=25,
                  batch_size=10,
-                 device=None):
+                 device=None,
+                 full=False):
         self.data_set = data_set
         self.start = start
         self.end = end
@@ -237,15 +238,23 @@ class LabeledDataLoader(object):
         self.window_size = window_size
         self.batch_size = batch_size
         self.is_unlabelled = unlabelled
+        self.full = full
         self.device = device
 
-    def unlabelled(self):
-        return LabeledDataLoader(self.data_set, self.start, self.end, True,
-                                 self.shuffle, self.window_size,
-                                 self.batch_size, self.device)
+    def unlabelled(self, full=False):
+        return LabeledDataLoader(
+            self.data_set,
+            self.start,
+            self.end,
+            True,
+            self.shuffle,
+            self.window_size,
+            self.batch_size,
+            self.device,
+            full=full)
 
     def __len__(self):
-        if self.is_unlabelled:
+        if self.is_unlabelled and not -self.full:
             return math.ceil((self.end - self.start) *
                              self.data_set.data.shape[1] / self.batch_size)
         else:
@@ -253,14 +262,18 @@ class LabeledDataLoader(object):
 
     def __iter__(self):
         if self.is_unlabelled:
-            return self.yield_unlabelled_batches(shuffle=self.shuffle)
+            return self.yield_unlabelled_batches(
+                shuffle=self.shuffle, full=self.full)
         else:
             return self.yield_batches(shuffle=self.shuffle)
 
-    def yield_unlabelled_batches(self, shuffle=True):
+    def yield_unlabelled_batches(self, shuffle=True, full=False):
         for batch_data, _ in self.yield_batches(shuffle=shuffle):
-            for i in range(batch_data.shape[2]):
-                yield batch_data[:, :, i]
+            if full:
+                yield batch_data
+            else:
+                for i in range(batch_data.shape[2]):
+                    yield batch_data[:, :, i]
 
     def yield_batches(self, shuffle=True):
         indices = np.arange(self.start, self.end)
