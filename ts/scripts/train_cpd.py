@@ -29,6 +29,7 @@ class CPDRNN(object):
                  highway_size,
                  dropout_rate,
                  bidirectional,
+                 predict_horizon=False,
                  grad_clip=10.,
                  device=None):
         self.device = device
@@ -48,17 +49,23 @@ class CPDRNN(object):
         self.highway_size = highway_size
         self.model_type = model_type
         self.dropout_rate = dropout_rate
+        self.predict_horizon = predict_horizon
+
+        if predict_horizon:
+            actual_output_size = self.window_size * self.output_size
+        else:
+            actual_output_size = self.output_size
 
         if model_type == 'gru':
             self.rnn = BasicRNN(
                 latent_size=latent_size,
                 input_size=input_size,
-                output_size=output_size)
+                output_size=actual_output_size)
             if bidirectional:
                 self.back_rnn = BasicRNN(
                     latent_size=latent_size,
                     input_size=input_size,
-                    output_size=output_size)
+                    output_size=actual_output_size)
         elif model_type == 'lstnet':
             self.rnn = LSTNet(
                 rnn_hidden_size=rnn_hidden_size,
@@ -69,7 +76,8 @@ class CPDRNN(object):
                 highway_size=highway_size,
                 dropout_rate=dropout_rate,
                 window_size=window_size,
-                output_size=output_size)
+                input_size=input_size,
+                output_size=actual_output_size)
             if bidirectional:
                 self.back_rnn = LSTNet(
                     rnn_hidden_size=rnn_hidden_size,
@@ -80,7 +88,8 @@ class CPDRNN(object):
                     highway_size=highway_size,
                     dropout_rate=dropout_rate,
                     window_size=window_size,
-                    output_size=output_size)
+                    input_size=input_size,
+                    output_size=actual_output_size)
 
         self.criteria.to(device)
         self.rnn.to(device)
@@ -126,19 +135,34 @@ class CPDRNN(object):
                 X, [self.window_size, self.window_size], dim=0)
 
             backward_X = torch.flip(backward_X, dims=(0, ))
-            forward_y = backward_X[-1]
-            backward_y = forward_X[-1]
+            if self.predict_horizon:
+                forward_y = backward_X.transpose(0, 1)
+                backward_y = forward_X.transpose(0, 1)
+            else:
+                forward_y = backward_X[-1]
+                backward_y = forward_X[-1]
 
             forward_y_hat = self.rnn(forward_X)
             # -> [B, C]
 
-            forward_y_scores = ((forward_y_hat - forward_y)**2).sum(1)
+            if self.predict_horizon:
+                forward_y_scores = ((forward_y_hat.view(
+                    forward_y_hat.size(0), self.window_size, self.output_size)
+                                     - forward_y)**2).sum(1)
+            else:
+                forward_y_scores = ((forward_y_hat - forward_y)**2).sum(1)
             # -> B
             scores = forward_y_scores
 
             if self.bidirectional:
                 backward_y_hat = self.back_rnn(backward_X)
-                backward_y_scores = ((backward_y_hat - backward_y)**2).sum(1)
+                if self.predict_horizon:
+                    backward_y_scores = ((backward_y_hat.view(
+                        backward_y_hat.size(0), self.window_size,
+                        self.output_size) - backward_y)**2).sum(1)
+                else:
+                    backward_y_scores = ((backward_y_hat - backward_y)
+                                         **2).sum(1)
                 scores += backward_y_scores
 
             Y_pred.append(scores.data.cpu().numpy())
@@ -195,15 +219,27 @@ class CPDRNN(object):
                 backward_x = torch.flip(backward_x, dims=(0, ))
                 # [wind_size, batch, 1]
 
-                forward_y = backward_x[-1]
-                backward_y = forward_x[-1]
+                if self.predict_horizon:
+                    forward_y = backward_x.transpose(0, 1)
+                    backward_y = forward_x.transpose(0, 1)
+                else:
+                    forward_y = backward_x[-1]
+                    backward_y = forward_x[-1]
 
                 optim.zero_grad()
                 pred_forward_y = self.rnn(forward_x)
+                if self.predict_horizon:
+                    pred_forward_y = pred_forward_y.view(
+                        pred_forward_y.size(0), self.window_size,
+                        self.output_size)
                 f_loss = self.criteria(pred_forward_y, forward_y)
 
                 if self.bidirectional:
                     pred_backward_y = self.back_rnn(backward_x)
+                    if self.predict_horizon:
+                        pred_backward_y = pred_backward_y.view(
+                            pred_backward_y.size(0), self.window_size,
+                            self.output_size)
                     b_loss = self.criteria(pred_backward_y, backward_y)
                     loss = (f_loss + b_loss) / 2.
                 else:
@@ -313,7 +349,7 @@ def train(args):
             device=device,
             shuffle=False)
     if args.test:
-        rnn = torch.load(args.save_path, 'model.best')
+        rnn = torch.load(os.path.join(args.save_path, 'model.best'))
         loss = rnn.eval_dataset(dataloader.tst_set)
         print(loss)
     else:
@@ -332,6 +368,7 @@ def train(args):
             skip_size=args.skip_size,
             highway_size=args.highway_size,
             dropout_rate=args.dropout_rate,
+            predict_horizon=args.predict_horizon,
             grad_clip=args.grad_clip)
         rnn.train(
             dataloader=dataloader.trn_set.unlabelled(),
@@ -402,6 +439,7 @@ def parse_args():
     parser.add_argument('--dropout-rate', type=float, default=0.2)
     parser.add_argument('--test', action='store_true')
     parser.add_argument('--bidirectional', action='store_true')
+    parser.add_argument('--predict-horizon', action='store_true')
     parser.add_argument('--weight-decay', type=float, default=0.001)
     return parser.parse_args()
 

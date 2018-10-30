@@ -12,12 +12,14 @@ class LSTNet(nn.Module):
                  skip_size,
                  window_size,
                  highway_size,
+                 input_size,
                  output_size,
                  dropout_rate,
                  output_func='linear'):
         super().__init__()
         self.window_size = window_size
         self.output_size = output_size
+        self.input_size = input_size
         self.rnn_hidden_size = rnn_hidden_size
         self.cnn_hidden_size = cnn_hidden_size
         self.rnn_skip_hidden = rnn_skip_hidden_size
@@ -28,7 +30,7 @@ class LSTNet(nn.Module):
         self.conv1 = nn.Conv2d(
             1,
             self.cnn_hidden_size,
-            kernel_size=(self.cnn_kernel_size, self.output_size))
+            kernel_size=(self.cnn_kernel_size, self.input_size))
         self.gru1 = nn.GRU(self.cnn_hidden_size, self.rnn_hidden_size)
         self.dropout = nn.Dropout(p=dropout_rate)
 
@@ -45,7 +47,8 @@ class LSTNet(nn.Module):
 
         # Highway layer
         if self.highway_size > 0:
-            self.highway = nn.Linear(self.highway_size, 1)
+            enlarge = self.output_size // self.input_size
+            self.highway = nn.Linear(self.highway_size, enlarge)
 
         self.output_func = None
         if output_func == 'sigmoid':
@@ -59,7 +62,7 @@ class LSTNet(nn.Module):
 
         # CNN
         outputs = inputs.transpose(0, 1).contiguous().view(
-            -1, 1, self.window_size, self.output_size)
+            -1, 1, self.window_size, self.input_size)
         outputs = F.relu(self.conv1(outputs))
         outputs = self.dropout(outputs)
         # [batch, hidden, seq, 1] -> [batch, hidden, seq]
