@@ -91,7 +91,7 @@ class LSTNet(nn.Module):
                 s_step = s[i].unsqueeze(0)
                 _, hidden = self.gru_skip(s_step, hidden)
                 hidden = self.dropout(hidden)
-            s = hidden.squeeze(0)
+            s = hidden.view(batch_size, self.skip_size * self.rnn_skip_hidden)
             r = torch.cat((r, s), 1)
 
         res = self.linear1(r)
@@ -112,18 +112,12 @@ class LSTNet(nn.Module):
 
 # Simple GRU baseline
 class BasicRNN(nn.Module):
-    def __init__(self,
-                 latent_size,
-                 input_size,
-                 output_size,
-                 predict_x=False,
-                 rnn_type='gru'):
+    def __init__(self, latent_size, input_size, output_size, rnn_type='gru'):
         super().__init__()
 
         self.output_size = output_size
         self.input_size = input_size
         self.latent_size = latent_size
-        self.predict_x = predict_x
 
         if rnn_type == 'gru':
             self.rnn_layer = nn.GRU(self.input_size, self.latent_size)
@@ -132,45 +126,16 @@ class BasicRNN(nn.Module):
         self.fc_layer = nn.Sequential(
             nn.Linear(self.latent_size, self.output_size), )
 
-        if predict_x:
-            self.pred_layer = nn.Sequential(
-                nn.Linear(self.latent_size, self.input_size), )
-            self.attn_layer = nn.Sequential(
-                nn.Linear(self.latent_size + self.input_size * 2, 1), )
+    def forward(self, inputs):
+        outputs, hidden = self.rnn_layer(inputs)
+        # outputs: [seq_len, batch, num_directions * hidden_size]
 
-    def forward(self, inputs, predict_all=False):
-        if self.predict_x:
-            attn = None
-            output_pred = None
-            outputs = []
-            outputs_pred = []
-            for i, inputs_t in enumerate(inputs.chunk(inputs.size(0), dim=0)):
-                if output_pred is not None:
-                    output_attn = torch.cat([inputs_t, output_pred, h_t],
-                                            dim=2)
-                    attn = F.sigmoid(self.attn_layer(output_attn))
+        outputs = outputs[-1]
 
-                    inputs_t = attn * inputs_t + (1 - attn) * output_pred
+        outputs = self.fc_layer(outputs)
+        # [batch, output_size]
 
-                o_t, h_t = self.rnn_layer(inputs_t)
-                output = self.fc_layer(o_t[-1]).unsqueeze(0)
-                output_pred = self.pred_layer(o_t[-1]).unsqueeze(0)
-
-                outputs += [output]
-                outputs_pred += [output_pred]
-            outputs = torch.cat(outputs, 0)
-            outputs_pred = torch.cat(outputs_pred, 0)
-            return outputs, outputs_pred
-        else:
-            outputs, hidden = self.rnn_layer(inputs)
-            # outputs: [seq_len, batch, num_directions * hidden_size]
-            if not predict_all:
-                outputs = outputs[-1]
-
-            outputs = self.fc_layer(outputs)
-            # [batch, output_size]
-
-            return outputs
+        return outputs
 
 
 class BasicGenerator(nn.Module):
