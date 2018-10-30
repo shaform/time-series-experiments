@@ -10,6 +10,7 @@ from ..data_loader import LabeledDataSet
 from ..scripts.train_rnn import RNN
 parser = argparse.ArgumentParser()
 parser.add_argument('--model-path', required=True)
+parser.add_argument('--model-type', default='gru')
 parser.add_argument('--bidirectional', action='store_true')
 parser.add_argument('--finetune', action='store_true')
 parser.add_argument('--raw', action='store_true')
@@ -60,14 +61,14 @@ for data_set_list in data_sets:
                 latent_size=10,
                 window_size=25,
                 device=device,
-                model_type='gru',
+                model_type=args.model_type,
                 rnn_hidden_size=10,
                 cnn_hidden_size=10,
                 cnn_kernel_size=6,
                 rnn_skip_hidden_size=5,
                 skip_size=10,
                 highway_size=10,
-                dropout_rate=0,
+                dropout_rate=0.2,
                 grad_clip=10.)
             finetune_path = args.model_path + '.' + os.path.basename(data_set)
             best_path = finetune_path + '.best'

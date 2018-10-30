@@ -61,10 +61,20 @@ class RNN(object):
                 highway_size=highway_size,
                 dropout_rate=dropout_rate,
                 window_size=window_size,
+                input_size=1,
                 output_size=1)
             if bidirectional:
-                self.backward_rnn = BasicRNN(
-                    latent_size=latent_size, input_size=1, output_size=1)
+                self.backward_rnn = LSTNet(
+                    rnn_hidden_size=rnn_hidden_size,
+                    cnn_hidden_size=cnn_hidden_size,
+                    cnn_kernel_size=cnn_kernel_size,
+                    rnn_skip_hidden_size=rnn_skip_hidden_size,
+                    skip_size=skip_size,
+                    highway_size=highway_size,
+                    dropout_rate=dropout_rate,
+                    window_size=window_size,
+                    input_size=1,
+                    output_size=1)
 
         self.criteria.to(device)
         self.forward_rnn.to(device)

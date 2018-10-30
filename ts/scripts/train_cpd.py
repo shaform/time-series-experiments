@@ -165,8 +165,9 @@ class CPDRNN(object):
                 forward_y_hat = self.rnn(forward_X)
             # -> [B, C]
 
-            forward_y_scores = ((forward_y_hat.view(forward_y_hat.size(0), -1)
-                                 - forward_y.view(forward_y_hat.size(0), -1))
+            forward_y_scores = ((
+                forward_y_hat.contiguous().view(forward_y_hat.size(0), -1) -
+                forward_y.contiguous().view(forward_y_hat.size(0), -1))
                                 **2).sum(-1)
             if len(forward_y_scores.size()) > 1:
                 forward_y_scores = forward_y_scores.sum(-1)
@@ -184,9 +185,9 @@ class CPDRNN(object):
                     backward_y_hat = torch.cat(backward_y_hat, dim=-1)
                 else:
                     backward_y_hat = self.back_rnn(backward_X)
-                backward_y_scores = (
-                    (backward_y_hat.view(backward_y_hat.size(0), -1) -
-                     backward_y.view(backward_y_hat.size(0), -1))**2).sum(-1)
+                backward_y_scores = ((backward_y_hat.contiguous().view(
+                    backward_y_hat.size(0), -1) - backward_y.contiguous().view(
+                        backward_y_hat.size(0), -1))**2).sum(-1)
                 if len(backward_y_scores.size()) > 1:
                     backward_y_scores = backward_y_scores.sum(-1)
                 scores += backward_y_scores
@@ -264,8 +265,8 @@ class CPDRNN(object):
                 else:
                     forward_y_hat = self.rnn(forward_X)
                 f_loss = self.criteria(
-                    forward_y_hat.view(forward_y_hat.size(0), -1),
-                    forward_y.view(forward_y_hat.size(0), -1))
+                    forward_y_hat.contiguous().view(forward_y_hat.size(0), -1),
+                    forward_y.contiguous().view(forward_y_hat.size(0), -1))
 
                 if self.bidirectional:
                     if self.predict_each:
@@ -279,8 +280,10 @@ class CPDRNN(object):
                     else:
                         backward_y_hat = self.back_rnn(backward_X)
                     b_loss = self.criteria(
-                        backward_y_hat.view(backward_y_hat.size(0), -1),
-                        backward_y.view(backward_y_hat.size(0), -1))
+                        backward_y_hat.view(
+                            backward_y_hat.contiguous().size(0), -1),
+                        backward_y.contiguous().view(
+                            backward_y_hat.size(0), -1))
                     loss = (f_loss + b_loss) / 2.
                 else:
                     loss = f_loss
@@ -436,7 +439,7 @@ def parse_args():
     parser.add_argument('--window-size', type=int, default=25)
     parser.add_argument('--save-path', default='models/gan')
     parser.add_argument('--num-epochs', type=int, default=200)
-    parser.add_argument('--batch-size', type=int, default=128)
+    parser.add_argument('--batch-size', type=int, default=10)
     parser.add_argument('--model-type', default='lstnet')
     parser.add_argument('--lr', type=float, default=0.0001)
     parser.add_argument('--beta1', type=float, default=0.5)
@@ -444,10 +447,10 @@ def parse_args():
     parser.add_argument(
         '--grad-clip', type=float, default=10.0, help='gradient clipping')
     parser.add_argument('--log-every', type=int, default=5)
-    parser.add_argument('--patience', type=int, default=5)
+    parser.add_argument('--patience', type=int, default=10)
     parser.add_argument('--max-num-trial', type=int, default=5)
     parser.add_argument('--lr-decay', type=float, default=0.5)
-    parser.add_argument('--valid-niter', type=int, default=212)
+    parser.add_argument('--valid-niter', type=int, default=2000)
     parser.add_argument('--seed', type=int, default=1126)
     parser.add_argument(
         '--cnn-hidden-size',
