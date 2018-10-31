@@ -239,6 +239,7 @@ class LabeledDataLoader(object):
         self.batch_size = batch_size
         self.is_unlabelled = unlabelled
         self.full = full
+        self.num_variables = self.data_set.data.shape[1]
         self.device = device
 
     def unlabelled(self, full=False):
@@ -254,7 +255,7 @@ class LabeledDataLoader(object):
             full=full)
 
     def __len__(self):
-        if self.is_unlabelled and not -self.full:
+        if self.is_unlabelled and not self.full:
             return math.ceil((self.end - self.start) *
                              self.data_set.data.shape[1] / self.batch_size)
         else:
