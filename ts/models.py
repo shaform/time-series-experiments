@@ -1,6 +1,25 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torch
+import numpy as np
+
+from .wavenet_vocoder import WaveNet
+from .wavenet_vocoder.mixture import discretized_mix_logistic_loss
+
+
+class DiscretizedMixturelogisticLoss(nn.Module):
+    def __init__(self, num_classes=65536):
+        super().__init__()
+        self.num_classes = num_classes
+
+    def forward(self, input, target):
+        losses = discretized_mix_logistic_loss(
+            input,
+            target,
+            num_classes=self.num_classes,
+            log_scale_min=float(np.log(1e-14)),
+            reduce=False)
+        return losses
 
 
 class LSTNet(nn.Module):

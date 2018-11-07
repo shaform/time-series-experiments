@@ -6,6 +6,91 @@ import torch
 from torch.autograd import Variable
 
 
+class WaveNetDataSet(object):
+    def __init__(self,
+                 data_path,
+                 receptive_field=25,
+                 trn_ratio=0.6,
+                 val_ratio=0.8,
+                 device=None):
+        self.data_path = data_path
+        self.device = device
+        self.receptive_field = receptive_field
+        self.trn_ratio = trn_ratio
+        self.val_ratio = val_ratio
+        self.load_data(trn_ratio=trn_ratio, val_ratio=val_ratio)
+
+    def change_point(self, labels):
+        labels = (labels != np.roll(labels, 1)).astype(np.float32)
+        labels[0] = 0.
+        return labels
+
+    def load_data(self, trn_ratio=0.6, val_ratio=0.8):
+        data_dict = np.load(self.data_path).item()
+        self.data = data_dict['Y']
+        # (N, ) to (N, 1)
+        self.data = self.data.reshape((self.data.shape[0], -1))
+
+        # to [0, 1]
+        mini = np.min(self.data, axis=0)
+        ptp = np.ptp(self.data, axis=0)
+
+        self.data = (self.data - mini) / ptp
+
+        self.labels = self.change_point(data_dict['L'])
+        self.labels = self.labels.reshape((-1, ))
+        # to (N,)
+
+        self.num_steps, self.num_variables = self.data.shape
+
+        self.trn_end = int(np.ceil(self.num_steps * trn_ratio))
+        self.val_end = int(np.ceil(self.num_steps * val_ratio))
+
+        self.trn_set = LabeledWaveNetDataSet(
+            self,
+            0,
+            self.trn_end,
+            receptive_field=self.receptive_field,
+            device=self.device)
+        self.val_set = LabeledWaveNetDataSet(
+            self,
+            self.trn_end,
+            self.val_end,
+            receptive_field=self.receptive_field,
+            device=self.device)
+        self.tst_set = LabeledWaveNetDataSet(
+            self,
+            self.val_end,
+            self.num_steps,
+            receptive_field=self.receptive_field,
+            device=self.device)
+
+
+class LabeledWaveNetDataSet(object):
+    def __init__(self, data_set, start, end, receptive_field=25, device=None):
+        self.data_set = data_set
+        self.start = start
+        self.end = end
+        self.receptive_field = receptive_field
+        self.num_variables = self.data_set.data.shape[1]
+        self.num_steps = end - start
+        self.device = device
+
+    def __len__(self):
+        # total all at once now
+        return 1
+
+    def __getitem__(self, idx):
+        data = self.data_set.data[self.start - self.receptive_field:self.end]
+        labels = self.data_set.labels[self.start:self.end]
+
+        # -> [C, T]
+        data = torch.tensor(data, dtype=torch.float).permute(1, 0).contiguous()
+        labels = torch.tensor(labels, dtype=torch.long)
+
+        return data, labels
+
+
 class ForcastDataLoader(object):
     def __init__(self,
                  data_set,
