@@ -7,6 +7,7 @@ import numpy as np
 import sklearn
 
 from ..data_loader import LabeledDataSet
+from ..data_loader import UnlabeledDataLoader
 from ..scripts.train_rnn import RNN
 parser = argparse.ArgumentParser()
 parser.add_argument('--model-path', required=True)
@@ -14,8 +15,12 @@ parser.add_argument('--model-type', default='gru')
 parser.add_argument('--bidirectional', action='store_true')
 parser.add_argument('--finetune', action='store_true')
 parser.add_argument('--raw', action='store_true')
+parser.add_argument('--cuda', action='store_true')
+parser.add_argument('--udata-paths', nargs='+')
 parser.add_argument('--window-size', type=int, default=25)
 args = parser.parse_args()
+
+device = torch.device('cuda') if args.cuda else torch.device('cpu')
 
 data_sets = [
     [
@@ -48,15 +53,15 @@ for data_set_list in data_sets:
             # XXX Yahoo has special ratio
             d = LabeledDataSet(
                 data_set,
-                device=torch.device('cuda'),
+                device=device,
                 shuffle=False,
+                batch_size=50,
                 trn_ratio=0.50,
                 val_ratio=0.75)
         else:
             d = LabeledDataSet(
-                data_set, device=torch.device('cuda'), shuffle=False)
+                data_set, batch_size=50, device=device, shuffle=False)
         if args.raw:
-            device = torch.device('cuda')
             rnn = RNN(
                 latent_size=10,
                 window_size=25,
@@ -83,18 +88,29 @@ for data_set_list in data_sets:
                     save_path=finetune_path)
             rnn = torch.load(best_path)
         else:
+            if args.udata_paths:
+                udataloader = UnlabeledDataLoader(
+                    data_paths=args.udata_paths,
+                    window_size=args.window_size,
+                    batch_size=50,
+                    device=device)
+            else:
+                udataloader = None
             rnn = torch.load(args.model_path)
             if args.finetune:
                 finetune_path = args.model_path + '.' + os.path.basename(
                     data_set)
+                if udataloader is not None:
+                    finetune_path += '.u'
                 best_path = finetune_path + '.best'
                 if not os.path.exists(best_path):
                     rnn.train(
                         d.trn_set.unlabelled(),
+                        udata=udataloader,
                         lr=0.00005,
                         beta1=0.5,
                         beta2=0.999,
-                        num_epochs=20,
+                        num_epochs=100,
                         val_dataloader=d.val_set,
                         save_path=finetune_path)
                 rnn = torch.load(best_path)

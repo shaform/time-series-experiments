@@ -81,6 +81,13 @@ class RNN(object):
         if bidirectional:
             self.backward_rnn.to(device)
 
+    def set_device(self, device):
+        self.device = device
+        self.criteria.to(device)
+        self.forward_rnn.to(device)
+        if self.bidirectional:
+            self.backward_rnn.to(device)
+
     def save(self, save_path):
         dirname = os.path.dirname(save_path)
         os.makedirs(dirname, exist_ok=True)
@@ -122,12 +129,40 @@ class RNN(object):
         auc = metrics.auc(fp_list, tp_list)
         return auc
 
+    def forward_once(self, X):
+        real_batch_size = X.shape[0]
+        X = X.transpose(0, 1).unsqueeze(-1).contiguous()
+        forward_x, backward_x = torch.split(
+            X, [self.window_size, self.window_size], dim=0)
+        backward_x = torch.flip(backward_x, dims=(0, ))
+        # [wind_size, batch, 1]
+
+        forward_y = backward_x[-1]
+        backward_y = forward_x[-1]
+        # [1, batch, 1]
+
+        pred_forward_y = self.forward_rnn(forward_x)
+        f_loss = self.criteria(pred_forward_y, forward_y)
+
+        if self.bidirectional:
+            pred_backward_y = self.backward_rnn(backward_x)
+            b_loss = self.criteria(pred_backward_y, backward_y)
+            loss = (f_loss + b_loss) / 2.
+            f_loss_item = f_loss.item()
+            b_loss_item = b_loss.item()
+        else:
+            loss = f_loss
+            f_loss_item = f_loss.item()
+            b_loss_item = 0.
+        return loss, f_loss_item, b_loss_item
+
     def train(self,
               dataloader,
               lr,
               beta1,
               beta2,
               num_epochs,
+              udata=None,
               val_dataloader=None,
               save_path=None,
               finetune=False):
@@ -148,38 +183,32 @@ class RNN(object):
         else:
             best_auc = best_epoch = 0
 
+        patience = 0
         for epoch in trange(num_epochs):
             self.forward_rnn.train()
             if self.bidirectional:
                 self.backward_rnn.train()
             t = tqdm(dataloader)
+
+            def gg():
+                while True:
+                    for k in udata:
+                        yield k
+
+            if udata is not None:
+                yield_all = gg()
+            else:
+                yield_all = None
+
             for i, batch_data in enumerate(t):
                 real_batch_size = batch_data.shape[0]
-                batch_data = batch_data.transpose(
-                    0, 1).unsqueeze(-1).contiguous()
-                forward_x, backward_x = torch.split(
-                    batch_data, [self.window_size, self.window_size], dim=0)
-                backward_x = torch.flip(backward_x, dims=(0, ))
-                # [wind_size, batch, 1]
-
-                forward_y = backward_x[-1]
-                backward_y = forward_x[-1]
-                # [1, batch, 1]
-
                 optim.zero_grad()
-                pred_forward_y = self.forward_rnn(forward_x)
-                f_loss = self.criteria(pred_forward_y, forward_y)
-
-                if self.bidirectional:
-                    pred_backward_y = self.backward_rnn(backward_x)
-                    b_loss = self.criteria(pred_backward_y, backward_y)
-                    loss = (f_loss + b_loss) / 2.
-                    f_loss_item = f_loss.item()
-                    b_loss_item = b_loss.item()
-                else:
-                    loss = f_loss
-                    f_loss_item = f_loss.item()
-                    b_loss_item = 0.
+                loss, f_loss_item, b_loss_item = self.forward_once(batch_data)
+                f_loss_item_2 = b_loss_item_2 = 0
+                if udata is not None:
+                    loss2, f_loss_item_2, b_loss_item_2 = self.forward_once(
+                        next(yield_all))
+                    loss += loss2
 
                 loss.backward()
                 if self.bidirectional:
@@ -194,10 +223,14 @@ class RNN(object):
                 t.set_postfix(
                     epoch='{}/{}'.format(epoch, num_epochs),
                     batch='{}/{}'.format(i, len(dataloader)),
+                    patience=patience,
                     best_auc=best_auc,
                     best_epoch=best_epoch,
                     f_loss=f_loss_item,
-                    b_loss=b_loss_item)
+                    b_loss=b_loss_item,
+                    f_loss_2=f_loss_item_2,
+                    b_loss_2=b_loss_item_2,
+                )
 
             if save_path is not None:
                 if val_dataloader is not None:
@@ -206,6 +239,11 @@ class RNN(object):
                         best_auc = auc
                         best_epoch = epoch
                         self.save(save_path + '.best')
+                        patience = 0
+                    else:
+                        patience += 1
+                        if patience > 10:
+                            break
                 else:
                     self.save(save_path + '.{}'.format(epoch))
 

@@ -71,14 +71,9 @@ class LSTNet(nn.Module):
         # RNN
         # -> [seq, batch, hidden]
         r = outputs.permute(2, 0, 1).contiguous()
-        seq_len = r.size(0)
-        hidden = None
-        for i in range(seq_len):
-            r_step = r[i].unsqueeze(0)
-            _, hidden = self.gru1(r_step, hidden)
-            hidden = self.dropout(hidden)
-        r = hidden.squeeze(0)
+        _, r = self.gru1(r)
         # -> [batch, hidden_size]
+        r = self.dropout(torch.squeeze(r, 0))
 
         # RNN-GRUskip
         if (self.skip_size > 0):
@@ -88,13 +83,9 @@ class LSTNet(nn.Module):
             s = s.permute(2, 0, 3, 1).contiguous()
             s = s.view(self.pt, batch_size * self.skip_size,
                        self.cnn_hidden_size)
-            seq_len = s.size(0)
-            hidden = None
-            for i in range(seq_len):
-                s_step = s[i].unsqueeze(0)
-                _, hidden = self.gru_skip(s_step, hidden)
-                hidden = self.dropout(hidden)
-            s = hidden.view(batch_size, self.skip_size * self.rnn_skip_hidden)
+            _, s = self.gru_skip(s)
+            s = s.view(batch_size, self.skip_size * self.rnn_skip_hidden)
+            s = self.dropout(s)
             r = torch.cat((r, s), 1)
 
         res = self.linear1(r)
@@ -129,11 +120,11 @@ class BasicRNN(nn.Module):
         self.fc_layer = nn.Sequential(
             nn.Linear(self.latent_size, self.output_size), )
 
-    def forward(self, inputs):
+    def forward(self, inputs, predict_all=False):
         outputs, hidden = self.rnn_layer(inputs)
         # outputs: [seq_len, batch, num_directions * hidden_size]
-
-        outputs = outputs[-1]
+        if not predict_all:
+            outputs = outputs[-1]
 
         outputs = self.fc_layer(outputs)
         # [batch, output_size]
