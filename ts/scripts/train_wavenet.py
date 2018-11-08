@@ -137,10 +137,9 @@ class WaveNetModel(nn.Module):
         patience = num_trial = curr_iter = 0
         t_epoch = trange(num_epochs)
         for epoch in t_epoch:
-            self.train()
-
             t = tqdm(dataloader_trn)
             for i, (X, _) in enumerate(t):
+                self.train()
                 X = X.to(self.device)
                 num_variables = X.shape[1]
                 loss_item = 0.
@@ -185,6 +184,7 @@ class WaveNetModel(nn.Module):
                                     % lr,
                                     file=sys.stderr)
                                 self.load_weights(save_path + '/model.best')
+                                patience = 0
                     else:
                         self.save(save_path + '/model.current')
 
