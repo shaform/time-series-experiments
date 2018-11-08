@@ -71,7 +71,7 @@ class WaveNetModel(nn.Module):
 
             X_losses = []
             num_steps = Y.shape[1]
-            num_variables = X.shape[2]
+            num_variables = X.shape[1]
             for X_j in X.chunk(num_variables, dim=1):
                 outputs = self.forward(X_j[:, :, :-1])
                 losses = self.compute_loss(outputs, X_j[:, :, 1:])
@@ -142,7 +142,7 @@ class WaveNetModel(nn.Module):
             t = tqdm(dataloader_trn)
             for i, (X, _) in enumerate(t):
                 X = X.to(self.device)
-                num_variables = X.shape[2]
+                num_variables = X.shape[1]
                 loss_item = 0.
                 for X_j in X.chunk(num_variables, dim=1):
                     optim.zero_grad()
@@ -243,8 +243,8 @@ def train(args):
     os.makedirs(args.save_path, exist_ok=True)
     wavenet.start_train(
         dataloader_trn=dataloader_trn,
-        dataloader_val=None,
-        #dataloader_val=dataloader_val,
+        # dataloader_val=None,
+        dataloader_val=dataloader_val,
         valid_iter=args.valid_iter,
         lr=args.lr,
         lr_decay=args.lr_decay,
@@ -261,15 +261,15 @@ def parse_args():
     parser.add_argument('--data-paths', nargs='+', required=True)
     parser.add_argument('--u-data-paths', nargs='+')
     parser.add_argument('--cuda', action='store_true')
-    parser.add_argument('--num-layers', type=int, default=20)
+    parser.add_argument('--num-layers', type=int, default=10)
     parser.add_argument('--num-mixtures', type=int, default=10)
     parser.add_argument('--save-path', default='models/wavenet')
     parser.add_argument('--num-epochs', type=int, default=1000)
     parser.add_argument('--max-num-trial', type=int, default=5)
     parser.add_argument('--max-patience', type=int, default=5)
     parser.add_argument('--batch-size', type=int, default=1)
-    parser.add_argument('--horizon', type=int, default=1025)
-    parser.add_argument('--valid-iter', type=int, default=300)
+    parser.add_argument('--horizon', type=int, default=512)
+    parser.add_argument('--valid-iter', type=int, default=100)
     parser.add_argument('--lr', type=float, default=0.0001)
     parser.add_argument('--lr-decay', type=float, default=0.5)
     parser.add_argument('--beta1', type=float, default=0.5)

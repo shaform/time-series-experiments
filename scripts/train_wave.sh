@@ -29,5 +29,4 @@ python -m ts.scripts.train_wavenet \
   parsed_data/unlabeled/electricity.npy \
   parsed_data/unlabeled/exchange_rate.npy \
   parsed_data/unlabeled/solar.npy \
-  parsed_data/unlabeled/traffic.npy \
-  --sub-sample 0.025
+  parsed_data/unlabeled/traffic.npy
