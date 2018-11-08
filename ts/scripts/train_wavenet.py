@@ -1,4 +1,5 @@
 import argparse
+import sys
 import os
 
 import numpy as np
@@ -13,7 +14,7 @@ from torch.nn.utils import clip_grad_norm_
 from torch.utils.data import DataLoader
 
 from ..models import BasicRNN, LSTNet, DiscretizedMixturelogisticLoss
-from ..data_loader import UnlabeledDataLoader, WaveNetDataSet
+from ..data_loader import UnlabeledDataLoader, WaveNetDataSet, WaveNetUDataSet, MergeDataset
 
 from ..wavenet_vocoder import WaveNet
 from ..wavenet_vocoder.mixture import discretized_mix_logistic_loss
@@ -34,10 +35,29 @@ class WaveNetModel(nn.Module):
         self.criterion = DiscretizedMixturelogisticLoss()
         self.receptive_field = self.wavenet.receptive_field
 
+    def set_device(self, device):
+        self.device = device
+
     def save(self, save_path):
         dirname = os.path.dirname(save_path)
         os.makedirs(dirname, exist_ok=True)
         torch.save(self, save_path)
+
+    def load_weights(self, model_path):
+        model = torch.load(model_path, map_location=self.device)
+        self.wavenet = model.wavenet
+        print('Model is loaded from \'{}\'...'.format(model_path))
+        return model
+
+    @staticmethod
+    def load(model_path, device=None):
+        if device is None:
+            device = torch.device('cpu')
+        model = torch.load(model_path, map_location=device)
+        model.set_device(device)
+
+        print('Model is loaded from \'{}\'...'.format(model_path))
+        return model
 
     def eval_dataset(self, dataloader):
         self.eval()
@@ -45,7 +65,7 @@ class WaveNetModel(nn.Module):
         Y_pred = []
         Y_true = []
 
-        for X, Y in dataloader:
+        for X, Y in tqdm(dataloader):
             X = X.to(self.device)
             Y = Y.to(self.device)
 
@@ -98,8 +118,10 @@ class WaveNetModel(nn.Module):
                     beta1,
                     beta2,
                     num_epochs,
+                    lr_decay=1.,
                     valid_iter=10,
                     max_patience=10,
+                    max_num_trial=10,
                     save_path=None):
         optim = torch.optim.Adam(
             self.parameters(), lr=lr, betas=(beta1, beta2))
@@ -112,16 +134,14 @@ class WaveNetModel(nn.Module):
         else:
             best_auc = best_iter = 0
 
-        patience = 0
-        curr_iter = 0
+        patience = num_trial = curr_iter = 0
         t_epoch = trange(num_epochs)
         for epoch in t_epoch:
             self.train()
 
             t = tqdm(dataloader_trn)
-            for i, (X, Y) in enumerate(t):
+            for i, (X, _) in enumerate(t):
                 X = X.to(self.device)
-                Y = Y.to(self.device)
                 num_variables = X.shape[2]
                 loss_item = 0.
                 for X_j in X.chunk(num_variables, dim=1):
@@ -154,8 +174,17 @@ class WaveNetModel(nn.Module):
                             patience = 0
                         else:
                             patience += 1
-                            if patience > max_patience:
-                                break
+                            if patience >= max_patience:
+                                num_trial += 1
+                                if num_trial >= max_num_trial:
+                                    print('early stop!', file=sys.stderr)
+                                    return
+                                lr = lr * lr_decay
+                                print(
+                                    'load previously best model and decay learning rate to %f'
+                                    % lr,
+                                    file=sys.stderr)
+                                self.load_weights(save_path + '/model.best')
                     else:
                         self.save(save_path + '/model.current')
 
@@ -176,45 +205,77 @@ def train(args):
         device=device)
     wavenet.to(device)
 
-    data_set = WaveNetDataSet(
-        data_path=args.data_path,
-        receptive_field=wavenet.receptive_field,
-        device=device)
+    # labelled data sets
+    trn_sets = []
+    val_sets = []
+    for path in args.data_paths:
+        if 'yahoo' in path:
+            data_set = WaveNetDataSet(
+                path,
+                receptive_field=wavenet.receptive_field,
+                device=device,
+                trn_ratio=0.50,
+                val_ratio=0.75)
+        else:
+            data_set = WaveNetDataSet(
+                path, receptive_field=wavenet.receptive_field, device=device)
+
+        trn_sets.append(data_set.trn_set.with_horizon(args.horizon))
+        val_sets.append(data_set.val_set.with_horizon(args.horizon))
+
+    # unlabelled data sets
+    for path in args.u_data_paths:
+        data_set = WaveNetUDataSet(
+            data_path=path,
+            receptive_field=wavenet.receptive_field,
+            horizon=args.horizon,
+            device=device)
+        trn_sets.append(data_set)
+
+    trn_set = MergeDataset(*trn_sets)
+    val_set = MergeDataset(*val_sets, sub_sample=args.sub_sample)
 
     dataloader_trn = DataLoader(
-        data_set.trn_set,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=4)
+        trn_set, batch_size=args.batch_size, shuffle=True, num_workers=1)
     dataloader_val = DataLoader(
-        data_set.val_set, batch_size=args.batch_size, num_workers=1)
+        val_set, batch_size=args.batch_size, num_workers=1)
 
     os.makedirs(args.save_path, exist_ok=True)
     wavenet.start_train(
         dataloader_trn=dataloader_trn,
-        dataloader_val=dataloader_val,
+        dataloader_val=None,
+        #dataloader_val=dataloader_val,
         valid_iter=args.valid_iter,
         lr=args.lr,
+        lr_decay=args.lr_decay,
         beta1=args.beta1,
         beta2=args.beta2,
         num_epochs=args.num_epochs,
+        max_patience=args.max_patience,
+        max_num_trial=args.max_num_trial,
         save_path=args.save_path)
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data-path', required=True)
+    parser.add_argument('--data-paths', nargs='+', required=True)
+    parser.add_argument('--u-data-paths', nargs='+')
     parser.add_argument('--cuda', action='store_true')
     parser.add_argument('--num-layers', type=int, default=20)
     parser.add_argument('--num-mixtures', type=int, default=10)
     parser.add_argument('--save-path', default='models/wavenet')
-    parser.add_argument('--num-epochs', type=int, default=200)
+    parser.add_argument('--num-epochs', type=int, default=1000)
+    parser.add_argument('--max-num-trial', type=int, default=5)
+    parser.add_argument('--max-patience', type=int, default=5)
     parser.add_argument('--batch-size', type=int, default=1)
-    parser.add_argument('--valid-iter', type=int, default=10)
+    parser.add_argument('--horizon', type=int, default=1025)
+    parser.add_argument('--valid-iter', type=int, default=300)
     parser.add_argument('--lr', type=float, default=0.0001)
+    parser.add_argument('--lr-decay', type=float, default=0.5)
     parser.add_argument('--beta1', type=float, default=0.5)
     parser.add_argument('--beta2', type=float, default=0.999)
     parser.add_argument('--seed', type=int, default=1127)
+    parser.add_argument('--sub-sample', type=float)
     return parser.parse_args()
 
 

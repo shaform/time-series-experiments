@@ -4,6 +4,94 @@ import math
 import numpy as np
 import torch
 from torch.autograd import Variable
+from torch.utils.data import Dataset
+
+
+class MergeDataset(Dataset):
+    def __init__(self, *datasets, sub_sample=None):
+        self.datasets = datasets
+        self.lens = [len(d) for d in datasets]
+        self.sub_sample = sub_sample
+        total = sum(self.lens)
+
+        if sub_sample:
+            self.indices = np.random.choice(total, int(total * sub_sample))
+            self.indices.sort()
+
+    def __getitem__(self, idx):
+        if self.sub_sample:
+            idx = self.indices[idx]
+
+        for i, length in enumerate(self.lens):
+            if idx < length:
+                return self.datasets[i][idx]
+            else:
+                idx -= length
+
+    def __len__(self):
+        if self.sub_sample:
+            return self.indices.shape[0]
+        else:
+            return sum(self.lens)
+
+
+class WaveNetUDataSet(Dataset):
+    def __init__(self,
+                 data_path,
+                 receptive_field=25,
+                 horizon=None,
+                 device=None):
+        if horizon is not None and horizon <= receptive_field:
+            horizon = receptive_field + 1
+
+        self.data_path = data_path
+        self.device = device
+        self.receptive_field = receptive_field
+        self.horizon = horizon
+        self.load_data()
+
+    def load_data(self):
+        self.data = np.load(self.data_path)
+        # (N, ) to (N, 1)
+        self.data = self.data.reshape((self.data.shape[0], -1))
+
+        # to [0, 1]
+        mini = np.min(self.data, axis=0)
+        ptp = np.ptp(self.data, axis=0)
+
+        self.data = (self.data - mini) / ptp
+        self.num_steps, self.num_variables = self.data.shape
+
+    def with_horizon(self, horizon):
+        return WaveNetUDataSet(
+            data_path=self.data_path,
+            receptive_field=self.receptive_field,
+            horizon=horizon,
+            device=self.device)
+
+    def __getitem__(self, idx):
+        # always zeros
+        labels = np.array([0])
+
+        if self.horizon is None:
+            data = self.data[:self.end]
+        else:
+            start = idx * (self.horizon - self.receptive_field)
+            end = min(self.num_steps, start + self.horizon)
+            data = self.data[start:end]
+
+        data = torch.tensor(data, dtype=torch.float).permute(1, 0).contiguous()
+        labels = torch.tensor(labels, dtype=torch.long)
+
+        return data, labels
+
+    def __len__(self):
+        # total all at once now
+        if self.horizon is None:
+            return 1
+        else:
+            return math.ceil((max(1, (self.num_steps - self.receptive_field)))
+                             / (self.horizon - self.receptive_field))
 
 
 class WaveNetDataSet(object):
@@ -66,25 +154,60 @@ class WaveNetDataSet(object):
             device=self.device)
 
 
-class LabeledWaveNetDataSet(object):
-    def __init__(self, data_set, start, end, receptive_field=25, device=None):
+class LabeledWaveNetDataSet(Dataset):
+    def __init__(self,
+                 data_set,
+                 start,
+                 end,
+                 receptive_field=25,
+                 horizon=None,
+                 device=None):
+        if horizon is not None and horizon <= receptive_field:
+            horizon = receptive_field + 1
+
         self.data_set = data_set
         self.start = start
         self.end = end
         self.receptive_field = receptive_field
         self.num_variables = self.data_set.data.shape[1]
         self.num_steps = end - start
+        self.horizon = horizon
         self.device = device
+
+        self.data_begin = max(0, self.start - self.receptive_field)
+
+    def with_horizon(self, horizon):
+        return LabeledWaveNetDataSet(
+            data_set=self.data_set,
+            start=self.start,
+            end=self.end,
+            receptive_field=self.receptive_field,
+            horizon=horizon,
+            device=self.device)
 
     def __len__(self):
         # total all at once now
-        return 1
+        if self.horizon is None:
+            return 1
+        else:
+            return math.ceil(
+                (max(1, (self.end - self.receptive_field) - self.data_begin)) /
+                (self.horizon - self.receptive_field))
 
     def __getitem__(self, idx):
-        data = self.data_set.data[self.start - self.receptive_field:self.end]
-        labels = self.data_set.labels[self.start:self.end]
+        if self.horizon is None:
+            data = self.data_set.data[self.data_begin:self.end]
+            labels = self.data_set.labels[self.start:self.end]
+        else:
+            start = self.data_begin + idx * (
+                self.horizon - self.receptive_field)
+            end = min(self.end, start + self.horizon)
+            data = self.data_set.data[start:end]
+            if start == self.data_begin:
+                labels = self.data_set.labels[self.start:end]
+            else:
+                labels = self.data_set.labels[start + self.receptive_field:end]
 
-        # -> [C, T]
         data = torch.tensor(data, dtype=torch.float).permute(1, 0).contiguous()
         labels = torch.tensor(labels, dtype=torch.long)
 
