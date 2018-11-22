@@ -108,11 +108,6 @@ class WaveNetDataSet(object):
         self.val_ratio = val_ratio
         self.load_data(trn_ratio=trn_ratio, val_ratio=val_ratio)
 
-    def change_point(self, labels):
-        labels = (labels != np.roll(labels, 1)).astype(np.float32)
-        labels[0] = 0.
-        return labels
-
     def load_data(self, trn_ratio=0.6, val_ratio=0.8):
         data_dict = np.load(self.data_path).item()
         self.data = data_dict['Y']
@@ -125,7 +120,7 @@ class WaveNetDataSet(object):
 
         self.data = (self.data - mini) / ptp
 
-        self.labels = self.change_point(data_dict['L'])
+        self.labels = data_dict['L']
         self.labels = self.labels.reshape((-1, ))
         # to (N,)
 
@@ -532,11 +527,6 @@ class LabeledDataSet(object):
         self.device = device
         self.load_data(trn_ratio=trn_ratio, val_ratio=val_ratio)
 
-    def change_point(self, labels):
-        labels = (labels != np.roll(labels, 1)).astype(np.float32)
-        labels[0] = 0.
-        return labels
-
     def load_data(self, trn_ratio=0.6, val_ratio=0.8):
         data_dict = np.load(self.data_path).item()
         self.data = data_dict['Y']
@@ -548,7 +538,7 @@ class LabeledDataSet(object):
 
         self.data = (self.data - mean) / std
 
-        self.labels = self.change_point(data_dict['L'])
+        self.labels = data_dict['L']
         self.labels = self.labels.reshape((self.labels.shape[0], -1))
 
         self.num_steps, self.num_variables = self.data.shape
