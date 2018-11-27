@@ -78,6 +78,8 @@ class LSTNet(nn.Module):
     def forward(self, inputs):
         # inputs: [seq, batch, output_size]
         batch_size = inputs.size(1)
+        if 'input_size' not in self.__dict__:
+            self.input_size = self.output_size
 
         # CNN
         outputs = inputs.transpose(0, 1).contiguous().view(

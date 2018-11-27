@@ -400,22 +400,22 @@ class ForcastDataSet(object):
         self.trn_set = ForcastDataLoader(
             self,
             self.window_size,
-            self.trn_end,
+            max(self.trn_end, self.window_size),
             shuffle=self.shuffle,
             window_size=self.window_size,
             batch_size=self.batch_size,
             device=self.device)
         self.val_set = ForcastDataLoader(
             self,
-            self.trn_end,
-            self.val_end,
+            max(self.trn_end, self.window_size),
+            max(self.val_end),
             shuffle=False,
             window_size=self.window_size,
             batch_size=self.batch_size,
             device=self.device)
         self.tst_set = ForcastDataLoader(
             self,
-            self.val_end,
+            max(self.val_end, self.window_size),
             self.num_steps,
             shuffle=False,
             window_size=self.window_size,
@@ -518,6 +518,7 @@ class LabeledDataSet(object):
                  batch_size=10,
                  trn_ratio=0.6,
                  val_ratio=0.8,
+                 normal='std',
                  device=None):
         self.data_path = data_path
         self.shuffle = shuffle
@@ -525,6 +526,7 @@ class LabeledDataSet(object):
         self.window_size = window_size
         self.batch_size = batch_size
         self.device = device
+        self.normal = normal
         self.load_data(trn_ratio=trn_ratio, val_ratio=val_ratio)
 
     def load_data(self, trn_ratio=0.6, val_ratio=0.8):
@@ -533,10 +535,17 @@ class LabeledDataSet(object):
         # (N, ) to (N, 1)
         self.data = self.data.reshape((self.data.shape[0], -1))
 
-        mean = np.mean(self.data, axis=0)
-        std = np.std(self.data, axis=0)
+        if self.normal == 'std':
+            mean = np.mean(self.data, axis=0)
+            std = np.std(self.data, axis=0)
 
-        self.data = (self.data - mean) / std
+            self.data = (self.data - mean) / std
+        elif self.normal == 'minmax':
+            maxi = np.max(self.data, axis=0)
+            mini = np.min(self.data, axis=0)
+            self.data = (self.data - mini) / np.maximum((maxi - mini), 1e-10)
+        else:
+            raise Exception('wrong')
 
         self.labels = data_dict['L']
         self.labels = self.labels.reshape((self.labels.shape[0], -1))
@@ -552,22 +561,22 @@ class LabeledDataSet(object):
         self.trn_set = LabeledDataLoader(
             self,
             self.window_size,
-            self.trn_end,
+            max(self.trn_end, self.window_size),
             shuffle=self.shuffle,
             window_size=self.window_size,
             batch_size=self.batch_size,
             device=self.device)
         self.val_set = LabeledDataLoader(
             self,
-            self.trn_end,
-            self.val_end,
+            max(self.trn_end, self.window_size),
+            max(self.val_end, self.window_size),
             shuffle=False,
             window_size=self.window_size,
             batch_size=self.batch_size,
             device=self.device)
         self.tst_set = LabeledDataLoader(
             self,
-            self.val_end,
+            max(self.val_end, self.window_size),
             self.num_steps,
             shuffle=False,
             window_size=self.window_size,

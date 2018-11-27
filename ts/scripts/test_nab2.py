@@ -21,6 +21,12 @@ device = torch.device('cuda') if args.cuda else torch.device('cpu')
 
 data_sets = [
     [
+        'nab_data/artificialNoAnomaly/art_daily_no_noise.csv.npy',
+        'nab_data/artificialNoAnomaly/art_daily_perfect_square_wave.csv.npy',
+        'nab_data/artificialNoAnomaly/art_daily_small_noise.csv.npy',
+        'nab_data/artificialNoAnomaly/art_flatline.csv.npy',
+        'nab_data/artificialNoAnomaly/art_noisy.csv.npy',
+        'nab_data/realAWSCloudwatch/ec2_cpu_utilization_c6585a.csv.npy',
         'nab_data/artificialWithAnomaly/art_daily_flatmiddle.csv.npy',
         'nab_data/artificialWithAnomaly/art_daily_jumpsdown.csv.npy',
         'nab_data/artificialWithAnomaly/art_daily_jumpsup.csv.npy',
@@ -76,7 +82,7 @@ data_sets = [
     ],
 ]
 
-outfile = open('testk', 'w')
+outfile = open('testk2', 'w')
 for data_set_list in data_sets:
     print('=====', data_set_list, '====')
     aucs = []
