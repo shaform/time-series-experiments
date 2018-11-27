@@ -292,7 +292,8 @@ class SingleUnlabeledDataLoader(object):
             print('use minmax')
             maxi = np.max(self.data, axis=0)
             mini = np.min(self.data, axis=0)
-            self.data = (self.data - mini) / np.maximum((maxi - mini), 1e-10)
+            mid = (maxi + mini) / 2
+            self.data = (self.data - mid) / np.maximum((maxi - mini), 1e-10)
         else:
             raise Exception('wrong')
 
@@ -562,7 +563,8 @@ class LabeledDataSet(object):
         elif self.normal == 'minmax':
             maxi = np.max(self.data, axis=0)
             mini = np.min(self.data, axis=0)
-            self.data = (self.data - mini) / np.maximum((maxi - mini), 1e-10)
+            mid = (maxi + mini) / 2
+            self.data = (self.data - mid) / np.maximum((maxi - mini), 1e-10)
         else:
             raise Exception('wrong')
 
