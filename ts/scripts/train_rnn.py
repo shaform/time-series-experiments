@@ -251,7 +251,7 @@ class RNN(object):
 def train(data_paths, cuda, latent_size, window_size, save_path, num_epochs,
           batch_size, lr, beta1, beta2, grad_clip, model_type, rnn_hidden_size,
           cnn_hidden_size, cnn_kernel_size, rnn_skip_hidden_size, skip_size,
-          highway_size, dropout_rate, seed):
+          highway_size, dropout_rate, seed, normal):
     # configurate seed
     np.random.seed(seed)
     random.seed(seed)
@@ -278,6 +278,7 @@ def train(data_paths, cuda, latent_size, window_size, save_path, num_epochs,
         data_paths=data_paths,
         window_size=window_size,
         batch_size=batch_size,
+        normal=normal,
         device=device)
     rnn.train(dataloader, lr, beta1, beta2, num_epochs, save_path=save_path)
 
@@ -330,6 +331,7 @@ def parse_args():
         type=int,
         default=5,
         help='hidden units nubmer of RNN-skip layer for LSTNet')
+    parser.add_argument('--normal', default='std')
     parser.add_argument('--dropout-rate', type=float, default=0.)
     return parser.parse_args()
 

@@ -265,11 +265,17 @@ class ForcastDataLoader(object):
 
 
 class SingleUnlabeledDataLoader(object):
-    def __init__(self, data_path, window_size=25, batch_size=10, device=None):
+    def __init__(self,
+                 data_path,
+                 window_size=25,
+                 batch_size=10,
+                 device=None,
+                 normal='std'):
         self.data_path = data_path
         self.window_size = window_size
         self.batch_size = batch_size
         self.device = device
+        self.normal = normal
         self.load_data()
 
     def load_data(self):
@@ -277,10 +283,18 @@ class SingleUnlabeledDataLoader(object):
         # (N, ) to (N, 1)
         self.data = self.data.reshape((self.data.shape[0], -1))
 
-        mean = np.mean(self.data, axis=0)
-        std = np.std(self.data, axis=0)
+        if self.normal == 'std':
+            mean = np.mean(self.data, axis=0)
+            std = np.std(self.data, axis=0)
 
-        self.data = (self.data - mean) / std
+            self.data = (self.data - mean) / std
+        elif self.normal == 'minmax':
+            print('use minmax')
+            maxi = np.max(self.data, axis=0)
+            mini = np.min(self.data, axis=0)
+            self.data = (self.data - mini) / np.maximum((maxi - mini), 1e-10)
+        else:
+            raise Exception('wrong')
 
         self.num_steps, self.num_variables = self.data.shape
 
@@ -326,6 +340,7 @@ class UnlabeledDataLoader(object):
                  shuffle=True,
                  window_size=25,
                  batch_size=10,
+                 normal='std',
                  device=None):
         self.data_paths = data_paths
         self.shuffle = shuffle
@@ -335,13 +350,17 @@ class UnlabeledDataLoader(object):
         self.window_size = window_size
         self.batch_size = batch_size
         self.device = device
+        self.normal = normal
         self.load_data()
 
     def load_data(self):
         self.data = [
-            SingleUnlabeledDataLoader(data_path, self.window_size,
-                                      self.batch_size, self.device)
-            for data_path in self.data_paths
+            SingleUnlabeledDataLoader(
+                data_path,
+                self.window_size,
+                self.batch_size,
+                self.device,
+                normal=self.normal) for data_path in self.data_paths
         ]
 
     def __len__(self):
