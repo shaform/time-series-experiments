@@ -5,7 +5,32 @@ import numpy as np
 import torch
 from torch.autograd import Variable
 from torch.utils.data import Dataset
+from tqdm import trange
 
+def running_mean_stds(data):
+    T = data.shape[0]
+    means = []
+    stds = []
+    current_sum = None
+    for i in trange(T):
+        if current_sum is None:
+            current_sum = data[i]
+        else:
+            current_sum = data[i] + current_sum
+
+        mean = current_sum / (i + 1.)
+        std = np.maximum(np.sqrt(np.mean(np.abs(data[:i+1] - mean)**2, axis=0)), 1e-10)
+
+        means.append(mean)
+        stds.append(std)
+    # shift 1 position
+    means = means[:1] + means[:-1]
+    stds = stds[:1] + stds[:-1]
+
+    means = np.array(means)
+    stds = np.array(stds)
+
+    return (data - means) / stds
 
 class MergeDataset(Dataset):
     def __init__(self, *datasets, sub_sample=None):
@@ -294,6 +319,9 @@ class SingleUnlabeledDataLoader(object):
             mini = np.min(self.data, axis=0)
             mid = (maxi + mini) / 2
             self.data = (self.data - mid) / np.maximum((maxi - mini), 1e-10)
+        elif self.normal == 'running':
+            print('use running')
+            self.data = running_mean_stds(self.data)
         else:
             raise Exception('wrong')
 
@@ -561,10 +589,14 @@ class LabeledDataSet(object):
 
             self.data = (self.data - mean) / std
         elif self.normal == 'minmax':
+            print('use minmax')
             maxi = np.max(self.data, axis=0)
             mini = np.min(self.data, axis=0)
             mid = (maxi + mini) / 2
             self.data = (self.data - mid) / np.maximum((maxi - mini), 1e-10)
+        elif self.normal == 'running':
+            print('use running')
+            self.data = running_mean_stds(self.data)
         else:
             raise Exception('wrong')
 
